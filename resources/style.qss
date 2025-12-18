@@ -1,0 +1,20 @@
+/* 视频预览区 */
+QLabel#result_text {
+    background: white;
+    color: black;
+    font-family: "Microsoft YaHei";
+    font-size: 20px;
+    font-weight: bold;
+    qproperty-alignment: AlignCenter;
+}
+
+/* 按钮 */
+QPushButton#run_button {
+    background: #009688;
+    color: white;
+    padding: 6px 18px;
+    border-radius: 4px;
+}
+QPushButton#run_button:hover {
+    background: #00796b;
+}
