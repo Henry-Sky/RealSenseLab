@@ -2,6 +2,10 @@ import numpy as np
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QImage, QPainter, QFont, QColor
 
+def rgb8_to_qimage(rgb: np.ndarray) -> QImage:
+    h, w, _ = rgb.shape
+    return QImage(rgb.tobytes(), w, h, rgb.strides[0], QImage.Format.Format_RGB888)
+
 def bgr8_to_qimage(bgr: np.ndarray) -> QImage:
     """BGR 8-bit (H,W,3) → QImage RGB888"""
     h, w, _ = bgr.shape

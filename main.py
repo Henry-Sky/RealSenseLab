@@ -18,7 +18,8 @@ def main():
     frame_cb = frame_callback(frame_cache)
     profile = pipe.start(cfg, callback=frame_cb)
 
-    window = MainWindow(frame_cache)
+    window = MainWindow()
+    window.bind_frame_queue(frame_cache)
     window.show()
 
     sys.exit(app.exec())
