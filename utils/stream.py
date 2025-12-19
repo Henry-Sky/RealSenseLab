@@ -1,7 +1,7 @@
 import queue
 import numpy as np
 import logging, time
-from pyrealsense2 import composite_frame, colorizer, option
+from pyrealsense2 import composite_frame, colorizer, option, stream
 
 # 日志配置
 logging.basicConfig(
@@ -10,6 +10,31 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S"
 )
+
+def frame_z16_to_points(depth_frame, depth_scale=None, intrin=None, profile = None):
+    """
+    把 depth_frame_z16
+    返回: points_3d  shape=(H*W, 3), dtype=float64
+    """
+    if profile is not None:
+        depth_scale = profile.get_device().first_depth_sensor().get_depth_scale()
+        intrin = profile.get_stream(stream.depth).as_video_stream_profile().get_intrinsics()
+    else:
+        if depth_scale is None or intrin is None:
+            return None
+    H, W = depth_frame.shape[:2]
+    z = depth_frame * depth_scale                        # 米
+    # 构建像素坐标网格
+    u, v = np.meshgrid(np.arange(W, dtype=np.float32),
+                      np.arange(H, dtype=np.float32), indexing='xy')
+    # 反投影到相机坐标系
+    x = (u - intrin.ppx) * z / intrin.fx
+    y = (v - intrin.ppy) * z / intrin.fy
+    # 堆叠成 N×3
+    points_3d = np.stack([x, y, z], axis=-1).reshape(-1, 3)
+    # 去掉 0 深度无效点
+    valid = points_3d[:, 2] > 0
+    return points_3d[valid]
 
 def frame_callback(_cache):
     """
@@ -55,9 +80,12 @@ if __name__ == "__main__":
     cfg.enable_stream(stream.depth, 640, 480, format.z16, 30)  # 设置深度视频采集
     frame_cache = queue.Queue(maxsize=3)  # 视频缓存
     # 启动 -> 返回一个profile（含实际打开的视频流参数）
-    frame_cb = frame_callback(frame_cache)
     try:
-        pipe.start(cfg, callback=frame_callback(frame_cache))
+        profile = pipe.start(cfg, callback=frame_callback(frame_cache))
+        # depth_scale: 0.0010000000474974513, intrin: [ 640x480  p[327.064 240.408]  f[393.544 393.544]  Brown Conrady [0 0 0 0 0] ]
+        depth_scale = profile.get_device().first_depth_sensor().get_depth_scale()
+        intrin = profile.get_stream(stream.depth).as_video_stream_profile().get_intrinsics()
+        print(f"depth_scale: {depth_scale}, intrin: {intrin}")
         logging.info("管道启动成功")
     except Exception as e:
         logging.error("启动失败: %s", e)

@@ -7,8 +7,11 @@ from utils.qutils import bgr8_to_qimage, rgb8_to_qimage, spawn_noise_background
 from detector import Detector
 
 class MainWindow(QWidget):
-    def __init__(self):
+    def __init__(self, profile = None):
         super().__init__()
+        if profile is not None:
+            self.profile = profile
+
         self.frame_queue = None
         self.depth_video_flag = False
         self.face_flag = False
@@ -103,14 +106,10 @@ class MainWindow(QWidget):
             if self.face_flag:
                 photo_img = spawn_noise_background(200, 300, "未知人像")
                 if self.detector.face_detect(self.frame["color"]):
-                    self.detector.draw_frame(self.frame["color"], "bgr8")
-                    faces = self.detector.corp_face_photo(frame=self.frame["color"], w=200, h=300)
-                    is_photo = self.detector.is_photo_face(self.frame["depth"])
-                    if is_photo[0]:
-                        self.result_text.setText("人像图片")
-                    else:
-                        self.result_text.setText("活体人脸")
-                    photo_img = bgr8_to_qimage(faces[0])
+                    self.detector.draw_face_rect(self.frame["color"], "bgr8")
+                    face_judge = self.detector.judge_person_real_or_photo(self.frame["depth"], profile=self.profile)
+                    print(face_judge[0])
+
                 else:
                     self.result_text.setText("无法识别")
                 self.photo_label.setPixmap(QPixmap.fromImage(photo_img))
@@ -127,7 +126,7 @@ class MainWindow(QWidget):
 
 
 
-    def closeEvent(self, event, /):
+    def closeEvent(self, event):
         self.timer.stop()
         self._running = False
         super().closeEvent(event)
