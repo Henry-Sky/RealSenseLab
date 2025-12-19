@@ -1,3 +1,5 @@
+from typing import Tuple
+
 import cv2
 import queue
 import random
@@ -21,20 +23,54 @@ class Detector():
         self._detector = FaceDetector.create_from_options(options)
         self._boxes_cache = []
 
+    def extend_roi_box(self,
+                       box: Tuple[int, int, int, int],
+                       size: Tuple[int, int],
+                       pad: int = 20) -> Tuple[int, int, int, int]:
+        """
+        将 ROI 矩形各边外扩 pad 像素，保持中心不变
+        :param box:  (x1, y1, x2, y2)  原始框（左上右下，含）
+        :param size: (w, h)            图像宽高，用于越界保护
+        :param pad:  外扩像素数，可正可负（负则收缩）
+        :return:     (x1, y1, x2, y2) 外扩后的合法框
+        """
+        x1, y1, x2, y2 = box
+        w, h = size
+        # 外扩
+        x1 -= pad
+        y1 -= pad
+        x2 += pad
+        y2 += pad
+        # 边界裁剪
+        x1 = max(0, x1)
+        y1 = max(0, y1)
+        x2 = min(w, x2)
+        y2 = min(h, y2)
+        return int(x1), int(y1), int(x2), int(y2)
+
     def judge_person_real_or_photo(self, frame_z16, profile):
         """
         判断是否为真人或照片
-        :param inliers_3d: 输入的3D点集
-        :return: 'photo' 或 'person'
+        :param frame_z16:
+        :return: list:
         """
         res = []
         # 绘制每一个人脸框图
         for box_queue in self._boxes_cache:
             assert isinstance(box_queue, queue.Queue)
-            (x1, y1, x2, y2) = self.get_smooth_box(box_queue)
+            box = self.get_smooth_box(box_queue)
+            ebox = self.extend_roi_box(box, size=(640, 480), pad=20)
+            x1, y1, x2, y2 = ebox
             frame_pts = frame_z16_to_points(frame_z16[y1:y2, x1:x2], profile=profile)
             plane_flag = self.plane_fit_ransac_simplified(frame_pts)
             if plane_flag:
+                res.append(False)
+                continue
+            # 分布检查
+            xyz_min = np.min(frame_pts, axis=0)
+            xyz_max = np.max(frame_pts, axis=0)
+            diff_xyz = xyz_max - xyz_min
+            if diff_xyz[0] < 0.02 and diff_xyz[1] < 0.02 and diff_xyz[2] < 0.02:
                 res.append(False)
                 continue
             res.append(True)
