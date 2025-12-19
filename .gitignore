@@ -1,2 +1,6 @@
 .idea
+models
 test.py
+test.jpg
+out.jpg
+realsense.log

@@ -4,19 +4,22 @@ from PySide6.QtWidgets import QWidget, QLabel, QPushButton, QVBoxLayout, QHBoxLa
 from PySide6.QtGui import QPixmap
 from utils.file import load_stylesheet
 from utils.qutils import bgr8_to_qimage, rgb8_to_qimage, spawn_noise_background
+from detector import Detector
 
 class MainWindow(QWidget):
     def __init__(self):
         super().__init__()
         self.frame_queue = None
         self.depth_video_flag = False
-        self.photo_flag = False
+        self.face_flag = False
         self.frame = None
+        self.detector = Detector()
 
         """---------------------------Widget----------------------------"""
-        self.video_label = QLabel("Video")
         self.toolbar = QToolBar()
         self.depth_button = QPushButton("深度伪彩")
+        self.face_button = QPushButton("人脸识别")
+        self.video_label = QLabel("Video")
         self.photo_label = QLabel("Photo")
         self.result_text = QLabel("无法识别")
         self.result_text.setObjectName("result_text")
@@ -27,7 +30,11 @@ class MainWindow(QWidget):
         video_img = spawn_noise_background(640, 480, "无视频信号")
         self.depth_button.setCheckable(True)
         self.depth_button.toggled.connect(self.toggle_depth)
+        self.face_button.setCheckable(True)
+        self.face_button.toggled.connect(self.toggle_face)
         self.toolbar.addWidget(self.depth_button)
+        self.toolbar.addWidget(self.face_button)
+
         photo_img = spawn_noise_background(200, 300, "未知人像")
         self.video_label.setPixmap(QPixmap.fromImage(video_img))
         self.photo_label.setPixmap(QPixmap.fromImage(photo_img))
@@ -69,13 +76,17 @@ class MainWindow(QWidget):
             self.run_button.setText("停止")
             self._running = True
 
+    def toggle_face(self, checked : bool):
+        if checked:
+            self.face_flag = True
+        else:
+            self.face_flag = False
+
     def toggle_depth(self, checked : bool):
         if checked:
             self.depth_video_flag = True
-            print("depth button is checked")
         else:
             self.depth_video_flag = False
-            print("depth button is unchecked")
 
     def update_frame(self):
         if self.frame_queue is None or not self._running:
@@ -88,6 +99,24 @@ class MainWindow(QWidget):
                 return
             else:
                 self.frame = self.frame_queue.get()
+            # 识别人像处理
+            if self.face_flag:
+                photo_img = spawn_noise_background(200, 300, "未知人像")
+                if self.detector.face_detect(self.frame["color"]):
+                    self.detector.draw_frame(self.frame["color"], "bgr8")
+                    faces = self.detector.corp_face_photo(frame=self.frame["color"], w=200, h=300)
+                    is_photo = self.detector.is_photo_face(self.frame["depth"])
+                    if is_photo[0]:
+                        self.result_text.setText("人像图片")
+                    else:
+                        self.result_text.setText("活体人脸")
+                    photo_img = bgr8_to_qimage(faces[0])
+                else:
+                    self.result_text.setText("无法识别")
+                self.photo_label.setPixmap(QPixmap.fromImage(photo_img))
+            else:
+                photo_img = spawn_noise_background(200, 300, "未知人像")
+                self.photo_label.setPixmap(QPixmap.fromImage(photo_img))
             # 视频信号处理
             if self.depth_video_flag:
                 rgb = rgb8_to_qimage(self.frame["pseudo"])
@@ -95,12 +124,6 @@ class MainWindow(QWidget):
             else:
                 bgr = bgr8_to_qimage(self.frame["color"])
                 self.video_label.setPixmap(QPixmap.fromImage(bgr))
-            # 识别人像处理
-            if self.photo_flag:
-                pass
-            else:
-                photo_img = spawn_noise_background(200, 300, "未知人像")
-                self.photo_label.setPixmap(QPixmap.fromImage(photo_img))
 
 
 
@@ -114,7 +137,6 @@ if __name__ == "__main__":
     import sys
     from PySide6.QtWidgets import QApplication
 
-    frame_cache = queue.Queue(maxsize=3)  # 视频缓存
     app = QApplication([])
     window = MainWindow()
     window.show()
