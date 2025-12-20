@@ -7,6 +7,7 @@ import mediapipe as mp
 from utils.stream import frame_z16_to_points
 from mediapipe.tasks.python import BaseOptions
 from mediapipe.tasks.python.vision import FaceDetector, RunningMode, FaceDetectorOptions
+from pyrealsense2 import stream, rs2_deproject_pixel_to_point, rs2_project_point_to_pixel, distortion
 
 # 配置模型路径（Tasks 官方预训练模型）
 MODEL_PATH = './models/blaze_face_short_range.tflite'
@@ -161,6 +162,69 @@ class Detector():
         smooth = (boxes.T @ weight).astype(int)  # (4,)
         return tuple(smooth)  # (x1,y1,x2,y2)
 
+    def draw_body_rect(self, frame_bgr8: np.ndarray,
+                       frame_z16: np.ndarray, profile):
+        """
+        在 640×480 BGR 图像上绘制人体轮廓（全身/半身自适应）
+        参数:
+            frame_bgr8: 480p 8-bit BGR
+            frame_z16: 480p 16-bit 深度（mm）
+        """
+        depth32 = frame_z16.astype(np.float32)  # 转 32F 供 floodFill 使用
+        face_box = self.get_smooth_box(self._boxes_cache[0])
+        h, w = 480, 640
+        x1, y1, x2, y2 = face_box
+        cx, cy = (x1 + x2) // 2, (y1 + y2) // 2
+        # D455 640×480 内参
+        intr = profile.get_stream(stream.depth).as_video_stream_profile().get_intrinsics()
+        intr.width, intr.height = w, h
+        intr.ppx, intr.ppy = 320.0, 240.0
+        intr.fx, intr.fy = 424.0, 424.0
+        intr.model = distortion.brown_conrady
+        # 深度 floodFill 提取人体
+        seed_z = depth32[cy, cy]                 # 采样改到 32F
+        if seed_z == 0:
+            return
+        mask = np.zeros((h + 2, w + 2), np.uint8)
+        cv2.floodFill(depth32, mask, (cx, cy), 0, loDiff=50, upDiff=50,
+                      flags=4 | cv2.FLOODFILL_MASK_ONLY | (255 << 8))
+        mask = mask[1:-1, 1:-1]
+        if np.count_nonzero(mask) < 500:
+            return
+        # 3D 点云计算真实高度
+        ys, xs = np.where(mask)
+        zs = frame_z16[ys, xs] / 1000.0
+        pts_cam = np.array([rs2_deproject_pixel_to_point(intr, [u, v], z)
+                            for u, v, z in zip(xs, ys, zs)])
+        y_min, y_max = pts_cam[:, 1].min(), pts_cam[:, 1].max()
+        real_height = y_max - y_min
+        if real_height < 0.3 or real_height > 2.5:
+            return
+        # 生成椭圆柱顶点
+        cx3, cz3 = pts_cam[:, 0].mean(), pts_cam[:, 2].mean()
+        half_h = real_height / 2
+        half_w = real_height * 0.35
+        step = 16
+        angles = np.linspace(0, 2 * np.pi, step, endpoint=False)
+        top = np.array([half_w * np.cos(angles),
+                        np.full(step, half_h),
+                        half_w * 0.4 * np.sin(angles)]).T
+        bot = top.copy()
+        bot[:, 1] = -half_h
+        vertices = np.vstack((top, bot)) + [cx3, 0, cz3]
+        # 投影回 2D
+        pts2d = np.array([rs2_project_point_to_pixel(intr, p)
+                          for p in vertices]).astype(int)
+        pts2d_top, pts2d_bot = pts2d[:step], pts2d[step:]
+        # 画轮廓
+        cv2.polylines(frame_bgr8, [pts2d_top], True, (0, 255, 0), 2)
+        cv2.polylines(frame_bgr8, [pts2d_bot], True, (0, 255, 0), 2)
+        for i in range(0, step, step // 4):
+            cv2.line(frame_bgr8,
+                     tuple(pts2d_top[i]),
+                     tuple(pts2d_bot[i]),
+                     (0, 255, 0), 2)
+
     def draw_face_rect(self, frame : np.ndarray, type : str):
         """
         传入 frame 单帧图片上画 face 框
@@ -211,6 +275,8 @@ class Detector():
                 self._boxes_cache[idx].put(box)
         self._boxes_cache = self._boxes_cache[:len(_result.detections)]
         return len(_result.detections) > 0
+
+
 
 if __name__ == '__main__':
     detector = Detector()
