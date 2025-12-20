@@ -13,6 +13,7 @@ def main():
     cfg = rs.config()  # 配置文件
     cfg.enable_stream(rs.stream.color, 640, 480, rs.format.bgr8, 30)  # 设置BGR-8位彩色视频
     cfg.enable_stream(rs.stream.depth, 640, 480, rs.format.z16, 30)  # 设置深度视频采集
+    align = rs.align(rs.stream.color)
     frame_cache = queue.Queue(maxsize=3)  # 视频缓存
     profile = pipe.start(cfg, callback=frame_callback(frame_cache))
 

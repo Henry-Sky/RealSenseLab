@@ -1,5 +1,4 @@
 from typing import Tuple
-
 import cv2
 import queue
 import random
@@ -47,6 +46,40 @@ class Detector():
         x2 = min(w, x2)
         y2 = min(h, y2)
         return int(x1), int(y1), int(x2), int(y2)
+
+    def corp_face_photo(self, frame: np.ndarray, w: int, h: int):
+        faces = []
+        tgt_ratio = w / h
+        if len(self._boxes_cache) == 0:
+            return faces
+        for box_queue in self._boxes_cache:
+            (x1, y1, x2, y2) = self.get_smooth_box(box_queue)
+            img_h, img_w = frame.shape[:2]
+            # 中心裁出同比例最大区域
+            fw, fh = x2 - x1, y2 - y1
+            src_ratio = fw / fh
+            # 原框更宽 -> 裁宽
+            if src_ratio > tgt_ratio:
+                new_fw = int(fh * tgt_ratio)
+                dw = fw - new_fw
+                x1 += dw // 2
+                x2 -= dw - dw // 2
+            # 原框更高 -> 裁高
+            else:
+                new_fh = int(fw / tgt_ratio)
+                dh = fh - new_fh
+                y1 += dh // 2
+                y2 -= dh - dh // 2
+            # 再次防越界（浮点取舍可能差 1px）
+            x1 = max(0, min(x1, img_w - 1))
+            y1 = max(0, min(y1, img_h - 1))
+            x2 = max(x1 + 1, min(x2, img_w))
+            y2 = max(y1 + 1, min(y2, img_h))
+            # 裁剪并缩放，不改颜色
+            roi = frame[y1:y2, x1:x2]
+            roi = cv2.resize(roi, (w, h), interpolation=cv2.INTER_LINEAR)
+            faces.append(roi)
+        return faces
 
     def judge_person_real_or_photo(self, frame_z16, profile):
         """

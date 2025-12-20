@@ -108,11 +108,15 @@ class MainWindow(QWidget):
                 if self.detector.face_detect(self.frame["color"]):
                     self.detector.draw_face_rect(self.frame["color"], "bgr8")
                     face_judge = self.detector.judge_person_real_or_photo(self.frame["depth"], profile=self.profile)
-                    print(face_judge[0])
-
+                    face_crop = self.detector.corp_face_photo(self.frame["color"], 200, 300)
+                    self.photo_label.setPixmap(QPixmap.fromImage(bgr8_to_qimage(face_crop[0])))
+                    if face_judge[0]:
+                        self.result_text.setText("识别真人")
+                    else:
+                        self.result_text.setText("识别照片")
                 else:
                     self.result_text.setText("无法识别")
-                self.photo_label.setPixmap(QPixmap.fromImage(photo_img))
+                    self.photo_label.setPixmap(QPixmap.fromImage(photo_img))
             else:
                 photo_img = spawn_noise_background(200, 300, "未知人像")
                 self.photo_label.setPixmap(QPixmap.fromImage(photo_img))
