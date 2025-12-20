@@ -181,48 +181,53 @@ class Detector():
         intr.ppx, intr.ppy = 320.0, 240.0
         intr.fx, intr.fy = 424.0, 424.0
         intr.model = distortion.brown_conrady
-        # 深度 floodFill 提取人体
-        seed_z = depth32[cy, cy]                 # 采样改到 32F
+        # floodFill 拿人体 mask
+        seed_z = depth32[cy, cx]
         if seed_z == 0:
             return
         mask = np.zeros((h + 2, w + 2), np.uint8)
-        cv2.floodFill(depth32, mask, (cx, cy), 0, loDiff=50, upDiff=50,
+        cv2.floodFill(depth32, mask, (cx, cy), 0,
+                      loDiff=50, upDiff=50,
                       flags=4 | cv2.FLOODFILL_MASK_ONLY | (255 << 8))
         mask = mask[1:-1, 1:-1]
         if np.count_nonzero(mask) < 500:
             return
-        # 3D 点云计算真实高度
+        # 3-D 点云
         ys, xs = np.where(mask)
         zs = frame_z16[ys, xs] / 1000.0
         pts_cam = np.array([rs2_deproject_pixel_to_point(intr, [u, v], z)
-                            for u, v, z in zip(xs, ys, zs)])
-        y_min, y_max = pts_cam[:, 1].min(), pts_cam[:, 1].max()
-        real_height = y_max - y_min
-        if real_height < 0.3 or real_height > 2.5:
-            return
-        # 生成椭圆柱顶点
-        cx3, cz3 = pts_cam[:, 0].mean(), pts_cam[:, 2].mean()
-        half_h = real_height / 2
-        half_w = real_height * 0.35
-        step = 16
-        angles = np.linspace(0, 2 * np.pi, step, endpoint=False)
-        top = np.array([half_w * np.cos(angles),
-                        np.full(step, half_h),
-                        half_w * 0.4 * np.sin(angles)]).T
-        bot = top.copy()
-        bot[:, 1] = -half_h
-        vertices = np.vstack((top, bot)) + [cx3, 0, cz3]
-        # 投影回 2D
+                            for u, v, z in zip(xs, ys, zs)], dtype=np.float32)
+        # PCA 算主方向
+        mean, eig_vec = cv2.PCACompute(pts_cam, mean=None)
+        eig_vec = eig_vec[:3]  # 3×3 正交基
+        # 把点云变换到主成分坐标系
+        pts_local = (pts_cam - mean) @ eig_vec.T
+        # 局部 AABB
+        local_min = pts_local.min(axis=0)
+        local_max = pts_local.max(axis=0)
+        # 8 个顶点（局部坐标）
+        dx, dy, dz = local_max - local_min
+        corners_local = np.array([
+            [0, 0, 0],
+            [dx, 0, 0],
+            [dx, dy, 0],
+            [0, dy, 0],
+            [0, 0, dz],
+            [dx, 0, dz],
+            [dx, dy, dz],
+            [0, dy, dz]
+        ]) + local_min
+        # 变换回相机坐标系
+        corners_cam = (corners_local @ eig_vec) + mean
+        # 投影回 2-D
         pts2d = np.array([rs2_project_point_to_pixel(intr, p)
-                          for p in vertices]).astype(int)
-        pts2d_top, pts2d_bot = pts2d[:step], pts2d[step:]
-        # 画轮廓
-        cv2.polylines(frame_bgr8, [pts2d_top], True, (0, 255, 0), 2)
-        cv2.polylines(frame_bgr8, [pts2d_bot], True, (0, 255, 0), 2)
-        for i in range(0, step, step // 4):
-            cv2.line(frame_bgr8,
-                     tuple(pts2d_top[i]),
-                     tuple(pts2d_bot[i]),
+                          for p in corners_cam]).astype(int)
+        # 画 12 条边
+        edges = [(0, 1), (1, 2), (2, 3), (3, 0),
+                 (4, 5), (5, 6), (6, 7), (7, 4),
+                 (0, 4), (1, 5), (2, 6), (3, 7)]
+        for i, j in edges:
+            cv2.line(frame_bgr8, tuple(pts2d[i]), tuple(pts2d[j]),
                      (0, 255, 0), 2)
 
     def draw_face_rect(self, frame : np.ndarray, type : str):

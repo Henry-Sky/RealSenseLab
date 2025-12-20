@@ -13,8 +13,6 @@ class MainWindow(QWidget):
             self.profile = profile
 
         self.frame_queue = None
-        self.depth_video_flag = False
-        self.face_flag = False
         self.frame = None
         self.detector = Detector()
 
@@ -22,6 +20,7 @@ class MainWindow(QWidget):
         self.toolbar = QToolBar()
         self.depth_button = QPushButton("深度伪彩")
         self.face_button = QPushButton("人脸识别")
+        self.body_button = QPushButton("身体框图")
         self.video_label = QLabel("Video")
         self.photo_label = QLabel("Photo")
         self.result_text = QLabel("无法识别")
@@ -35,8 +34,10 @@ class MainWindow(QWidget):
         self.depth_button.toggled.connect(self.toggle_depth)
         self.face_button.setCheckable(True)
         self.face_button.toggled.connect(self.toggle_face)
+        self.body_button.setCheckable(True)
         self.toolbar.addWidget(self.depth_button)
         self.toolbar.addWidget(self.face_button)
+        self.toolbar.addWidget(self.body_button)
 
         photo_img = spawn_noise_background(200, 300, "未知人像")
         self.video_label.setPixmap(QPixmap.fromImage(video_img))
@@ -103,16 +104,17 @@ class MainWindow(QWidget):
             else:
                 self.frame = self.frame_queue.get()
             # 识别人像处理
-            if self.face_flag:
+            if self.face_button.isChecked():
                 photo_img = spawn_noise_background(200, 300, "未知人像")
                 if self.detector.face_detect(self.frame["color"]):
                     self.detector.draw_face_rect(self.frame["color"], "bgr8")
                     face_judge = self.detector.judge_person_real_or_photo(self.frame["depth"], profile=self.profile)
                     face_crop = self.detector.corp_face_photo(self.frame["color"], 200, 300)
                     self.photo_label.setPixmap(QPixmap.fromImage(bgr8_to_qimage(face_crop[0])))
-                    self.detector.draw_body_rect(self.frame["color"], self.frame["depth"], profile=self.profile)
                     if face_judge[0]:
                         self.result_text.setText("识别真人")
+                        if self.body_button.isChecked():
+                            self.detector.draw_body_rect(self.frame["color"], self.frame["depth"], profile=self.profile)
                     else:
                         self.result_text.setText("识别照片")
                 else:
@@ -123,7 +125,7 @@ class MainWindow(QWidget):
                 photo_img = spawn_noise_background(200, 300, "未知人像")
                 self.photo_label.setPixmap(QPixmap.fromImage(photo_img))
             # 视频信号处理
-            if self.depth_video_flag:
+            if self.depth_button.isChecked():
                 rgb = rgb8_to_qimage(self.frame["pseudo"])
                 self.video_label.setPixmap(QPixmap.fromImage(rgb))
             else:
