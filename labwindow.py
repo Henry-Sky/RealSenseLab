@@ -9,31 +9,31 @@ class LabWindow(QMainWindow):
         self.setWindowTitle("RealSenseLab Demo")
 
         # --------------------------创建组件&命名组件--------------------------
-        self.view_label = QLabel(self)
-        self.view_label.setObjectName("view_label")
-        self.photo_label = QLabel(self)
-        self.photo_label.setObjectName("photo_label")
-        self.result_label = QLabel(self)
-        self.result_label.setObjectName("result_label")
-        self.run_button = QPushButton(self)
-        self.run_button.setObjectName("run_button")
+        self._view_label = QLabel(self)
+        self._view_label.setObjectName("view_label")
+        self._photo_label = QLabel(self)
+        self._photo_label.setObjectName("photo_label")
+        self._result_label = QLabel(self)
+        self._result_label.setObjectName("result_label")
+        self._run_button = QPushButton(self)
+        self._run_button.setObjectName("run_button")
 
         # ------------------------------配置组件------------------------------
         view_img = spawn_noise_background(1280, 720, "无视频信号")
-        self.view_label.setPixmap(QPixmap.fromImage(view_img))
+        self._view_label.setPixmap(QPixmap.fromImage(view_img))
         photo_img = spawn_noise_background(200, 300, "未知人像")
-        self.photo_label.setPixmap(QPixmap.fromImage(photo_img))
-        self.result_label.setText("无法识别")
-        self.run_button.setText("开始")
+        self._photo_label.setPixmap(QPixmap.fromImage(photo_img))
+        self._result_label.setText("无法识别")
+        self._run_button.setText("开始")
 
         # ------------------------------设置布局------------------------------
         main_hbox = QHBoxLayout()
         left_vbox = QVBoxLayout()
         right_vbox = QVBoxLayout()
-        left_vbox.addWidget(self.view_label)
-        right_vbox.addWidget(self.photo_label)
-        right_vbox.addWidget(self.result_label)
-        right_vbox.addWidget(self.run_button)
+        left_vbox.addWidget(self._view_label)
+        right_vbox.addWidget(self._photo_label)
+        right_vbox.addWidget(self._result_label)
+        right_vbox.addWidget(self._run_button)
         main_hbox.addLayout(left_vbox)
         main_hbox.addLayout(right_vbox)
 
@@ -41,8 +41,10 @@ class LabWindow(QMainWindow):
         central_widget = QWidget(self)
         central_widget.setLayout(main_hbox)
         self.setCentralWidget(central_widget)
-        self.setStyleSheet(load_file_content("resources/styles/style.css"))
+        self.setStyleSheet(load_file_content("resources/styles/style.qss"))
 
+    def linkStream(self):
+        pass
 
     def closeEvent(self, event: QCloseEvent):
         super().closeEvent(event)
