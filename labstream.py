@@ -1,16 +1,76 @@
+import time
+
+import numpy as np
 import pyrealsense2 as rs
+from framebuffer import FrameBuffer, FramePair
 
 class LabStream:
     def __init__(self):
-        self.context = rs.context()
-        self.pipeline = rs.pipeline()
-        pass
+        self._profile = None
+        self._frame_buffer = FrameBuffer(maxsize=6)  # 长度为 6 的定长缓冲队列
+        self._pipeline = rs.pipeline()
+        self._colorizer = rs.colorizer()
+        self._align = rs.align(rs.stream.depth)
+        # 配置相机捕获帧类型
+        self._cfg = rs.config()
+        self._cfg.enable_stream(rs.stream.color, 1280, 720, rs.format.bgr8, 30)
+        self._cfg.enable_stream(rs.stream.depth, 1280, 720, rs.format.z16, 30)
+        self._cfg.enable_stream(rs.stream.infrared, 1, 1280, 720, rs.format.y8, 30)
+        self._cfg.enable_stream(rs.stream.infrared, 2, 1280, 720, rs.format.y8, 30)
 
-    def streamStart(self):
-        pass
+    def _call_back(self, _frames):
+        _frames_aligned : rs.composite_frame = self._align.process(_frames)
+        _color_frame = _frames_aligned.get_color_frame()
+        _depth_frame = _frames_aligned.get_depth_frame()
+        _infrared_1_frame = _frames_aligned.get_infrared_frame(1)
+        _infrared_2_frame = _frames_aligned.get_infrared_frame(2)
+        self._frame_buffer.put(
+            FramePair(
+                frame_bgr8=np.asarray(_color_frame.get_data()),
+                frame_z16=np.asarray(_depth_frame.get_data()),
+                frame_ir1_y8=np.asarray(_infrared_1_frame.get_data()),
+                frame_ir2_y8=np.asarray(_infrared_2_frame.get_data()),
+                ts_color=_color_frame.get_timestamp(),
+                ts_depth=_depth_frame.get_timestamp(),
+                ts_ir1=_infrared_1_frame.get_timestamp(),
+                ts_ir2=_infrared_2_frame.get_timestamp(),
+            )
+        )
 
-    def streamStop(self):
-        pass
+    def start_stream(self):
+        self._profile = self._pipeline.start(self._cfg, self._call_back)
+        if not self._profile:
+            raise RuntimeError("启动 Stream 失败")
+        time.sleep(1)
+        return self._frame_buffer
 
-    def streamEnd(self):
-        pass
+    def stop_stream(self):
+        self._pipeline.stop()
+
+
+if __name__ == '__main__':
+    cfg = rs.config()
+    # 全 1280×720
+    cfg.enable_stream(rs.stream.color, 1280, 720, rs.format.bgr8, 30)
+    cfg.enable_stream(rs.stream.depth, 1280, 720, rs.format.z16, 30)
+    cfg.enable_stream(rs.stream.infrared, 1, 1280, 720, rs.format.y8, 30)
+    cfg.enable_stream(rs.stream.infrared, 2, 1280, 720, rs.format.y8, 30)
+
+    pipe = rs.pipeline()
+    align = rs.align(rs.stream.depth)
+    try:
+        pipe.start(cfg)
+        t0 = time.time()
+        for _ in range(300):  # 10 秒 @30fps
+            frames = pipe.wait_for_frames(timeout_ms=5000)
+            aligned_frames = align.process(frames)
+            intrin = aligned_frames.get_depth_frame()._profile.as_video_stream_profile().intrinsics
+            print(f"{aligned_frames.get_color_frame().get_frame_number()}\t"
+                  f"{aligned_frames.get_depth_frame().get_frame_number()}\t"
+                  f"{aligned_frames.get_infrared_frame(1).get_frame_number()}\t"
+                  f"{aligned_frames.get_infrared_frame(2).get_frame_number()}")
+        print("10 秒无丢帧，带宽 OK")
+    except Exception as e:
+        print("启动失败:", e)
+    finally:
+        pipe.stop()
