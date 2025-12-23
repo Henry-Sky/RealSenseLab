@@ -10,7 +10,7 @@ def bgr8_to_qimage(bgr: np.ndarray) -> QImage:
 
 def spawn_noise_background(w=640, h=480, text="无信号") -> QImage:
     """
-    获取噪声背景
+    获取固定尺寸噪声背景(用于UI占位)
     :param w: 图像宽度
     :param h: 图像高度
     :param text: 显示提示文字
