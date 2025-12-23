@@ -1,4 +1,6 @@
 import numpy as np
+import time
+import threading
 from dataclasses import dataclass
 from collections import deque
 from typing import List
@@ -17,7 +19,7 @@ class FramePair:
 
 class FrameBuffer:
     """
-    定长帧缓冲队列，线程安全，满了自动丢弃最旧帧
+    定长帧缓冲队列，线程安全，队满自动丢弃最旧帧，仅限 FramePair 数据
     """
     def __init__(self, maxsize: int):
         if maxsize <= 0:
@@ -36,7 +38,7 @@ class FrameBuffer:
         with self._lock:
             while not self._buf:
                 # 用条件变量可以做成真正阻塞，这里简化成抛异常
-                raise IndexError("buffer empty")
+                raise IndexError("缓存队列为空，无法取出")
             return self._buf.popleft()
 
     def peek(self, idx: int = 0) -> FramePair:
@@ -65,8 +67,6 @@ class FrameBuffer:
 
 
 if __name__ == "__main__":
-    import threading
-    import time
 
     fb = FrameBuffer(maxsize=6)
 

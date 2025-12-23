@@ -1,5 +1,4 @@
 import time
-
 import numpy as np
 import pyrealsense2 as rs
 from framebuffer import FrameBuffer, FramePair
@@ -19,6 +18,7 @@ class LabStream:
         self._cfg.enable_stream(rs.stream.infrared, 2, 1280, 720, rs.format.y8, 30)
 
     def _call_back(self, _frames):
+        _frames = rs.composite_frame(_frames)
         _frames_aligned : rs.composite_frame = self._align.process(_frames)
         _color_frame = _frames_aligned.get_color_frame()
         _depth_frame = _frames_aligned.get_depth_frame()
@@ -41,7 +41,6 @@ class LabStream:
         self._profile = self._pipeline.start(self._cfg, self._call_back)
         if not self._profile:
             raise RuntimeError("启动 Stream 失败")
-        time.sleep(1)
         return self._frame_buffer
 
     def stop_stream(self):
@@ -49,28 +48,16 @@ class LabStream:
 
 
 if __name__ == '__main__':
-    cfg = rs.config()
-    # 全 1280×720
-    cfg.enable_stream(rs.stream.color, 1280, 720, rs.format.bgr8, 30)
-    cfg.enable_stream(rs.stream.depth, 1280, 720, rs.format.z16, 30)
-    cfg.enable_stream(rs.stream.infrared, 1, 1280, 720, rs.format.y8, 30)
-    cfg.enable_stream(rs.stream.infrared, 2, 1280, 720, rs.format.y8, 30)
-
-    pipe = rs.pipeline()
-    align = rs.align(rs.stream.depth)
-    try:
-        pipe.start(cfg)
-        t0 = time.time()
-        for _ in range(300):  # 10 秒 @30fps
-            frames = pipe.wait_for_frames(timeout_ms=5000)
-            aligned_frames = align.process(frames)
-            intrin = aligned_frames.get_depth_frame()._profile.as_video_stream_profile().intrinsics
-            print(f"{aligned_frames.get_color_frame().get_frame_number()}\t"
-                  f"{aligned_frames.get_depth_frame().get_frame_number()}\t"
-                  f"{aligned_frames.get_infrared_frame(1).get_frame_number()}\t"
-                  f"{aligned_frames.get_infrared_frame(2).get_frame_number()}")
-        print("10 秒无丢帧，带宽 OK")
-    except Exception as e:
-        print("启动失败:", e)
-    finally:
-        pipe.stop()
+    ls = LabStream()
+    frame_buffer = ls.start_stream()
+    start = time.time()
+    while True:
+        if len(frame_buffer) > 0:
+            frame_pair = frame_buffer.peek(-1)
+            print(frame_pair.ts_color)
+        else:
+            print("no buffer")
+        if time.time() - start > 10:
+            break
+        time.sleep(0.5)
+    ls.stop_stream()
