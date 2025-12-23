@@ -8,6 +8,11 @@ from PySide6.QtWidgets import QApplication
 def main():
     app = QApplication([])
 
+    ctx = rs.context()
+    devices = ctx.query_devices()
+    if len(devices) == 0:
+        raise RuntimeError("No devices found")
+
     # 配置视频流
     pipe = rs.pipeline()  # 视频管线
     cfg = rs.config()  # 配置文件

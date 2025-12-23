@@ -1,6 +1,10 @@
 .idea
+.venv
 models
+build
+dist
+RealSenseLab.spec
 test.py
 test.jpg
 out.jpg
-realsense.log
+runtime_hook.py

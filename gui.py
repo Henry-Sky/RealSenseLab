@@ -1,7 +1,10 @@
+import os
+import sys
+import pathlib
 import queue
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QWidget, QLabel, QPushButton, QVBoxLayout, QHBoxLayout, QToolBar
-from PySide6.QtGui import QPixmap
+from PySide6.QtGui import QPixmap, QIcon
 from utils.file import load_stylesheet
 from utils.qutils import bgr8_to_qimage, rgb8_to_qimage, spawn_noise_background
 from detector import Detector
@@ -9,6 +12,11 @@ from detector import Detector
 class MainWindow(QWidget):
     def __init__(self, profile = None):
         super().__init__()
+        self.setWindowTitle("RealSenseLab 小组实验课作业：黄瑞、周敬浩")
+        # 开发时取项目根目录，打包后取 PyInstaller 临时目录
+        BASE_DIR = pathlib.Path(getattr(sys, '_MEIPASS', pathlib.Path(__file__).resolve().parent.parent))
+        icon_path = os.path.join(BASE_DIR, "imgs/21.简标朱稿.png")
+        self.setWindowIcon(QIcon(icon_path))
         if profile is not None:
             self.profile = profile
 

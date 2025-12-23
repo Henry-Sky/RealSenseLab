@@ -1,3 +1,6 @@
+import os
+import pathlib
+import sys
 from typing import Tuple
 import cv2
 import queue
@@ -9,8 +12,13 @@ from mediapipe.tasks.python import BaseOptions
 from mediapipe.tasks.python.vision import FaceDetector, RunningMode, FaceDetectorOptions
 from pyrealsense2 import stream, rs2_deproject_pixel_to_point, rs2_project_point_to_pixel, distortion
 
+# 获取当前脚本所在目录（开发时）
+BASE_DIR = pathlib.Path(__file__).resolve().parent
+# 如果是 PyInstaller 单文件模式，就用临时解压目录；否则用 BASE_DIR
+RUNTIME_DIR = pathlib.Path(getattr(sys, '_MEIPASS', BASE_DIR))
 # 配置模型路径（Tasks 官方预训练模型）
-MODEL_PATH = './models/blaze_face_short_range.tflite'
+MODEL_DIR = os.path.join(RUNTIME_DIR, 'models')
+MODEL_PATH = os.path.join(MODEL_DIR, 'blaze_face_short_range.tflite')
 
 class Detector():
     def __init__(self):

@@ -3,14 +3,6 @@ import numpy as np
 import logging, time
 from pyrealsense2 import composite_frame, colorizer, option, stream
 
-# 日志配置
-logging.basicConfig(
-    filename="realsense.log",
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S"
-)
-
 def frame_z16_to_points(depth_frame, depth_scale=None, intrin=None, profile = None):
     """
     把 depth_frame_z16
