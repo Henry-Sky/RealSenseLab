@@ -2,12 +2,10 @@ import time
 from dataclasses import dataclass
 from typing import Tuple
 import cv2
-import mediapipe as mp
 import numpy as np
-from mediapipe.tasks.python import BaseOptions
-from mediapipe.tasks.python.vision import FaceDetectorOptions, RunningMode, FaceDetector, FaceDetectorResult
+from insightface.app import FaceAnalysis
 from collections import deque
-from utils.file import lab_read_path
+from utils.file import BASE_DIR
 
 AFTER_FRAMES_CLEAR = 9  # 默认 9 帧未更新 cache 就将其重置
 
@@ -21,41 +19,10 @@ class FaseCache:
 
 class LabDetector:
     def __init__(self):
-        model_path = lab_read_path("models/blaze_face_short_range.tflite")
-        fd_options = FaceDetectorOptions(
-            base_options=BaseOptions(model_asset_path = model_path),
-            running_mode=RunningMode.LIVE_STREAM,
-            min_detection_confidence=0.7,
-            result_callback=self._face_result_callback,
-        )
-        self._face_detector = FaceDetector.create_from_options(fd_options)
-        self._face_caches = deque(maxlen=3)
+        self._face_detector = FaceAnalysis(providers=['CUDAExecutionProvider', 'CPUExecutionProvider'], root=BASE_DIR)
+        self._face_detector.prepare(ctx_id=0, det_size=(640, 640))
+        self._face_caches = deque(maxlen=6)
         self._start_time = time.time()  # 单位 s
-
-    def _face_result_callback(self, result: FaceDetectorResult, output_image: mp.Image, timestamp_ms: int):
-        if not result.detections:
-            return
-        # 取可信度最高的一张人脸
-        best_detection = max(result.detections, key=lambda d: d.categories[0].score)
-        bbox = best_detection.bounding_box
-        _x1 = int(bbox.origin_x)
-        _y1 = int(bbox.origin_y)
-        _x2 = int(bbox.origin_x + bbox.width)
-        _y2 = int(bbox.origin_y + bbox.height)
-        _face_cache = FaseCache(
-            box=(_x1, _y1, _x2, _y2),
-            is_photo=False,
-            timestamp_ms=timestamp_ms,
-        )
-        if not self._face_caches:
-            self._face_caches.append(_face_cache)
-            return
-        else:
-            last_cache : FaseCache = self._face_caches[-1]
-            if _face_cache.timestamp_ms - last_cache.timestamp_ms > 33 * AFTER_FRAMES_CLEAR:
-                self._face_caches.clear()
-            self._face_caches.append(_face_cache)
-            return
 
     def get_face_roi(self, frame_bgr8, width: int, height: int) -> np.ndarray | None:
         _box = self._get_face_box()
@@ -89,10 +56,28 @@ class LabDetector:
         :param _frame: BGR8格式图片
         :return: None
         """
-        rgb = cv2.cvtColor(_frame, cv2.COLOR_BGR2RGB)
-        mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=np.ascontiguousarray(rgb))
+        faces = self._face_detector.get(_frame)
+        if faces is None or len(faces) == 0:
+            return
+
         timestamp_ms = int((time.time() - self._start_time) * 1000)  # 单位 ms
-        self._face_detector.detect_async(mp_image, timestamp_ms)
+        best_face = max(faces, key=lambda f: f['det_score'])
+        bbox = best_face['bbox']
+        _x1, _y1, _x2, _y2 = bbox
+        _face_cache = FaseCache(
+            box=(_x1, _y1, _x2, _y2),
+            is_photo=False,
+            timestamp_ms=timestamp_ms,
+        )
+        if not self._face_caches:
+            self._face_caches.append(_face_cache)
+            return
+        else:
+            last_cache: FaseCache = self._face_caches[-1]
+            if _face_cache.timestamp_ms - last_cache.timestamp_ms > 33 * AFTER_FRAMES_CLEAR:
+                self._face_caches.clear()
+            self._face_caches.append(_face_cache)
+            return
 
     def _get_face_box(self) -> tuple[int, int, int, int] | None:
         """
@@ -135,15 +120,10 @@ if __name__ == '__main__':
     fps_delay = int(1000 / 30)  # 33 ms ≈ 30 fps
 
     while True:
-        frame_cnt += 1
         ret, frame = cap.read()
         if not ret: raise RuntimeError("读取摄像头失败")
-        if frame_cnt % 3 == 0:
-            detector.detect_once(frame)
-        box = detector._get_face_box()
-        if box is not None:
-            x1, y1, x2, y2 = box
-            cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
+        detector.detect_once(frame)
+        detector.draw_face_rectangle(frame)
         cv2.imshow("frame", frame)
         if cv2.waitKey(1) & 0xFF == ord('q'):
             break
