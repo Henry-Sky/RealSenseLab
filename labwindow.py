@@ -1,12 +1,19 @@
+from PySide6.QtCore import QTimer
 from PySide6.QtGui import QCloseEvent, Qt, QPixmap
 from PySide6.QtWidgets import QMainWindow, QApplication, QLabel, QPushButton, QHBoxLayout, QVBoxLayout, QWidget
-from utils.qutils import spawn_noise_background
+
+from framebuffer import FrameBuffer, FramePair
+from labstream import LabStream
+from utils.qutils import spawn_noise_background, bgr8_to_qimage
 from utils.file import load_file_content
 
 class LabWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("RealSenseLab Demo")
+        self.stream = LabStream()
+        self.frame_buffer = None
+        self._running = False
 
         # --------------------------创建组件&命名组件--------------------------
         self._view_label = QLabel(self)
@@ -25,6 +32,7 @@ class LabWindow(QMainWindow):
         self._photo_label.setPixmap(QPixmap.fromImage(photo_img))
         self._result_label.setText("无法识别")
         self._run_button.setText("开始")
+        self._run_button.clicked.connect(self.toggle_running)
 
         # ------------------------------设置布局------------------------------
         main_hbox = QHBoxLayout()
@@ -43,8 +51,34 @@ class LabWindow(QMainWindow):
         self.setCentralWidget(central_widget)
         self.setStyleSheet(load_file_content("resources/styles/style.qss"))
 
-    def linkStream(self):
-        pass
+        # ------------------------------启动定时------------------------------
+        self.timer = QTimer(self)
+        self.timer.timeout.connect(self.windows_update)
+        self.timer.start(1000 // 60)  # 60 fps
+
+    def toggle_running(self):
+        if self._running:
+            self.frame_buffer = None
+            self.stream.stop_stream()
+            self._run_button.setText("开始")
+            self._running = False
+        else:
+            self.frame_buffer = self.stream.start_stream()
+            self._run_button.setText("停止")
+            self._running = True
+
+    def windows_update(self):
+        if self._running and self.frame_buffer is not None and len(self.frame_buffer) > 0:
+            last_frames : FramePair = self.frame_buffer.peek(-1)
+            view_img = bgr8_to_qimage(last_frames.original_bgr8)
+            self._view_label.setPixmap(QPixmap.fromImage(view_img))
+
+        else:
+            view_img = spawn_noise_background(1280, 720, "无视频信号")
+            self._view_label.setPixmap(QPixmap.fromImage(view_img))
+            photo_img = spawn_noise_background(200, 300, "未知人像")
+            self._photo_label.setPixmap(QPixmap.fromImage(photo_img))
+
 
     def closeEvent(self, event: QCloseEvent):
         super().closeEvent(event)
