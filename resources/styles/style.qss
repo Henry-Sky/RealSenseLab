@@ -1,5 +1,5 @@
 /* 视频预览区 */
-QLabel#result_text {
+QLabel#result_label {
     background: white;
     color: black;
     font-family: "Microsoft YaHei";
