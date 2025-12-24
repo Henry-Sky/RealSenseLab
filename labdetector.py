@@ -1,4 +1,7 @@
 import time
+from dataclasses import dataclass
+from typing import Tuple
+
 import cv2
 import mediapipe as mp
 import numpy as np
@@ -6,6 +9,12 @@ from mediapipe.tasks.python import BaseOptions
 from mediapipe.tasks.python.vision import FaceDetectorOptions, RunningMode, FaceDetector, FaceDetectorResult
 from collections import deque
 from utils.file import lab_read_path
+
+@dataclass(slots=True)
+class FaseCache:
+    box : Tuple[int, int, int, int]
+    is_photo : bool
+    timestamp_ms : int
 
 
 class LabDetector:
@@ -18,7 +27,7 @@ class LabDetector:
             result_callback=self._face_result_callback,
         )
         self._face_detector = FaceDetector.create_from_options(fd_options)
-        self._face_boxes = deque(maxlen=8)
+        self._face_caches = deque(maxlen=8)
         self._start_time = time.time()  # 单位 s
 
     def _face_result_callback(self, result: FaceDetectorResult, output_image: mp.Image, timestamp_ms: int):
@@ -31,10 +40,18 @@ class LabDetector:
         _y1 = int(bbox.origin_y)
         _x2 = int(_x1 + bbox.width)
         _y2 = int(_y1 + bbox.height)
-        _box = (_x1, _y1, _x2, _y2, timestamp_ms)
-        if len(self._face_boxes) > 0 and timestamp_ms - self._face_boxes[-1][-1] > 33 * 9:
-            self._face_boxes.clear()
-        self._face_boxes.append(_box)
+        _face_cache = FaseCache(
+            box=(_x1, _y1, _x2, _y2),
+            is_photo=False,
+            timestamp_ms=timestamp_ms,
+        )
+        if not self._face_caches:
+            self._face_caches.append(_face_cache)
+        else:
+            last_cache : FaseCache = self._face_caches[-1]
+            if _face_cache.timestamp_ms - last_cache.timestamp_ms > 33 * 9:
+                self._face_caches.clear()
+            self._face_caches.append(_face_cache)
 
     def detect_once(self, _frame : np.ndarray) -> None:
         """
@@ -52,15 +69,16 @@ class LabDetector:
         按与最新帧的时间差指数衰减加权，越新框权重越大
         :return: x1, y1, x2, y2
         """
-        if not self._face_boxes:
+        if not self._face_caches:
             return None
         timestamp_ms = int((time.time() - self._start_time) * 1000)  # 单位 ms
-        if timestamp_ms - self._face_boxes[-1][-1] > 33 * 9:
-            self._face_boxes.clear()
+        last_cache: FaseCache = self._face_caches[-1]
+        if timestamp_ms - last_cache.timestamp_ms > 33 * 9:
+            self._face_caches.clear()
             return None
         # 注意boxes中存放box含时间戳
-        boxes = np.array(self._face_boxes, dtype=np.float32)  # (N,5) 含 time
-        times = boxes[:, -1]  # 时间戳列
+        boxes = np.array([x.box for x in self._face_caches], dtype=np.float32)
+        times = np.array([x.timestamp_ms for x in self._face_caches])  # 时间戳列
         dt = times[-1] - times  # 与最新帧的差(ms)
         alpha = 0.7  # 衰减系数，可调
         weight = alpha ** (dt / 33.)  # 33 ms ≈ 30 fps 基准
@@ -68,6 +86,11 @@ class LabDetector:
         _x1, _y1, _x2, _y2 = (boxes[:, :4].T @ weight).astype(int)  # 只平滑 x1,y1,x2,y2
         return _x1, _y1, _x2, _y2  # (x1,y1,x2,y2)
 
+    def draw_face_rectangle(self, frame: np.ndarray) -> None:
+        face_box = self.get_face_box()
+        if face_box is not None:
+            x1, y1, x2, y2 = face_box
+            cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
 
 
 
