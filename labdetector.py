@@ -1,3 +1,4 @@
+import threading
 import time
 from dataclasses import dataclass
 from typing import Tuple
@@ -8,6 +9,7 @@ from collections import deque
 from utils.file import BASE_DIR
 
 AFTER_FRAMES_CLEAR = 9  # 默认 9 帧未更新 cache 就将其重置
+MAX_FACE_CACHES_LENGTH = 6
 
 
 @dataclass(slots=True)
@@ -21,7 +23,7 @@ class LabDetector:
     def __init__(self):
         self._face_detector = FaceAnalysis(providers=['CUDAExecutionProvider', 'CPUExecutionProvider'], root=BASE_DIR)
         self._face_detector.prepare(ctx_id=0, det_size=(640, 640))
-        self._face_caches = deque(maxlen=6)
+        self._face_caches = deque(maxlen=MAX_FACE_CACHES_LENGTH)
         self._start_time = time.time()  # 单位 s
 
     def get_face_roi(self, frame_bgr8, width: int, height: int) -> np.ndarray | None:
@@ -56,6 +58,9 @@ class LabDetector:
         :param _frame: BGR8格式图片
         :return: None
         """
+        threading.Thread(target=self._detect_thread(_frame), daemon=True).start()
+
+    def _detect_thread(self, _frame : np.ndarray):
         faces = self._face_detector.get(_frame)
         if faces is None or len(faces) == 0:
             return
