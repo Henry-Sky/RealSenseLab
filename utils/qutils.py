@@ -1,3 +1,4 @@
+import cv2
 import numpy as np
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QImage, QPainter, QFont, QColor
@@ -7,6 +8,11 @@ def bgr8_to_qimage(bgr: np.ndarray) -> QImage:
     h, w, _ = bgr.shape
     rgb = bgr[..., ::-1]
     return QImage(rgb.tobytes(), w, h, rgb.strides[0], QImage.Format.Format_RGB888)
+
+def trans_pseudo_color(_depth_frame : np.ndarray) -> np.ndarray:
+    depth_cm = cv2.convertScaleAbs(_depth_frame, alpha=255 / 3000.0)
+    colorized = cv2.applyColorMap(depth_cm, cv2.COLORMAP_JET)
+    return colorized
 
 def spawn_noise_background(w=640, h=480, text="无信号") -> QImage:
     """

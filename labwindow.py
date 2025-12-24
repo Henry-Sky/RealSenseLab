@@ -1,13 +1,14 @@
 from PySide6.QtCore import QTimer
 from PySide6.QtGui import QCloseEvent, QPixmap
-from PySide6.QtWidgets import QMainWindow, QApplication, QLabel, QPushButton, QHBoxLayout, QVBoxLayout, QWidget, \
-    QToolBar
-
+from PySide6.QtWidgets import QMainWindow, QApplication, QLabel, QPushButton, QHBoxLayout, QVBoxLayout, QWidget, QToolBar
 from framebuffer import FramePair
 from labdetector import LabDetector
 from labstream import LabStream
-from utils.qutils import spawn_noise_background, bgr8_to_qimage
+from utils.qutils import spawn_noise_background, bgr8_to_qimage, trans_pseudo_color
 from utils.file import load_file_content
+
+DETECTION_DELAY_STAMP_FRAMES = 3  # 每 3 帧调用一次检测器线程
+WINDOWS_UPDATE_FPS = 60  # 窗口刷新 FPS
 
 class LabWindow(QMainWindow):
     def __init__(self):
@@ -70,11 +71,10 @@ class LabWindow(QMainWindow):
         # ------------------------------启动定时------------------------------
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.windows_update)
-        self.timer.start(1000 // 60)  # 60 fps
+        self.timer.start(1000 // WINDOWS_UPDATE_FPS)  # Default 60 fps
 
     def toggle_running(self):
         if self._running:
-            self.frame_buffer = None
             self.stream.stop_stream()
             self._run_button.setText("开始")
             self._running = False
@@ -91,13 +91,16 @@ class LabWindow(QMainWindow):
             self._photo_label.setPixmap(QPixmap.fromImage(photo_img))
 
         if self._running and self.frame_buffer is not None and len(self.frame_buffer) > 0:
-            last_frames : FramePair = self.frame_buffer.peek(-1)
+            current_frames : FramePair = self.frame_buffer.peek(-1)
+            view_bgr8 = current_frames.frame_bgr8
+            if self._depth_button.isChecked():
+                view_bgr8 = trans_pseudo_color(current_frames.frame_z16)
             if self._face_button.isChecked():
-                if self.frame_cnt % 6 == 0:
-                    self.detector.detect_once(last_frames.frame_bgr8)
-                if self.frame_cnt > 6:
-                    self.detector.draw_face_rectangle(last_frames.original_bgr8)
-            view_img = bgr8_to_qimage(last_frames.original_bgr8)
+                if self.frame_cnt % DETECTION_DELAY_STAMP_FRAMES == 0:
+                    self.detector.detect_once(current_frames.frame_bgr8)
+                if self.frame_cnt > DETECTION_DELAY_STAMP_FRAMES:
+                    self.detector.draw_face_rectangle(view_bgr8)
+            view_img = bgr8_to_qimage(view_bgr8)
             self._view_label.setPixmap(QPixmap.fromImage(view_img))
         self.frame_cnt += 1
 
