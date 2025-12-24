@@ -10,6 +10,9 @@ from mediapipe.tasks.python.vision import FaceDetectorOptions, RunningMode, Face
 from collections import deque
 from utils.file import lab_read_path
 
+AFTER_FRAMES_CLEAR = 9  # 默认 9 帧未更新 cache 就将其重置
+
+
 @dataclass(slots=True)
 class FaseCache:
     box : Tuple[int, int, int, int]
@@ -27,7 +30,7 @@ class LabDetector:
             result_callback=self._face_result_callback,
         )
         self._face_detector = FaceDetector.create_from_options(fd_options)
-        self._face_caches = deque(maxlen=8)
+        self._face_caches = deque(maxlen=16)
         self._start_time = time.time()  # 单位 s
 
     def _face_result_callback(self, result: FaceDetectorResult, output_image: mp.Image, timestamp_ms: int):
@@ -38,8 +41,8 @@ class LabDetector:
         bbox = best_detection.bounding_box
         _x1 = int(bbox.origin_x)
         _y1 = int(bbox.origin_y)
-        _x2 = int(_x1 + bbox.width)
-        _y2 = int(_y1 + bbox.height)
+        _x2 = int(bbox.origin_x + bbox.width)
+        _y2 = int(bbox.origin_y + bbox.height)
         _face_cache = FaseCache(
             box=(_x1, _y1, _x2, _y2),
             is_photo=False,
@@ -47,11 +50,13 @@ class LabDetector:
         )
         if not self._face_caches:
             self._face_caches.append(_face_cache)
+            return
         else:
             last_cache : FaseCache = self._face_caches[-1]
-            if _face_cache.timestamp_ms - last_cache.timestamp_ms > 33 * 9:
+            if _face_cache.timestamp_ms - last_cache.timestamp_ms > 33 * AFTER_FRAMES_CLEAR:
                 self._face_caches.clear()
             self._face_caches.append(_face_cache)
+            return
 
     def detect_once(self, _frame : np.ndarray) -> None:
         """
@@ -73,10 +78,10 @@ class LabDetector:
             return None
         timestamp_ms = int((time.time() - self._start_time) * 1000)  # 单位 ms
         last_cache: FaseCache = self._face_caches[-1]
-        if timestamp_ms - last_cache.timestamp_ms > 33 * 9:
+        if timestamp_ms - last_cache.timestamp_ms > 33 * AFTER_FRAMES_CLEAR:
             self._face_caches.clear()
             return None
-        # 注意boxes中存放box含时间戳
+        # 拆解 face_cache 的 box 和 timestamp_ms
         boxes = np.array([x.box for x in self._face_caches], dtype=np.float32)
         times = np.array([x.timestamp_ms for x in self._face_caches])  # 时间戳列
         dt = times[-1] - times  # 与最新帧的差(ms)

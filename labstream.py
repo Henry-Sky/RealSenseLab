@@ -9,7 +9,7 @@ class LabStream:
         self._frame_buffer = FrameBuffer(maxsize=6)  # 长度为 6 的定长缓冲队列
         self._pipeline = rs.pipeline()
         self._colorizer = rs.colorizer()
-        self._align = rs.align(rs.stream.depth)
+        self._align = rs.align(rs.stream.color)
         # 配置相机捕获帧类型
         self._config = rs.config()
         self._config.enable_stream(rs.stream.color, 1280, 720, rs.format.bgr8, 30)
@@ -27,7 +27,6 @@ class LabStream:
         _infrared_2_frame = _frames_aligned.get_infrared_frame(2)
         self._frame_buffer.put(
             FramePair(
-                original_bgr8=np.array(_original_frame.get_data()),
                 frame_bgr8=np.asarray(_color_frame.get_data()),
                 frame_z16=np.asarray(_depth_frame.get_data()),
                 frame_ir1_y8=np.asarray(_infrared_1_frame.get_data()),

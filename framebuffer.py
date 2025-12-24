@@ -7,7 +7,6 @@ from typing import List
 
 @dataclass(slots=True)
 class FramePair:
-    original_bgr8 : np.ndarray
     frame_bgr8 : np.ndarray
     frame_z16 : np.ndarray
     frame_ir1_y8 : np.ndarray
