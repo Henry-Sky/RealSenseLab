@@ -11,11 +11,11 @@ class LabStream:
         self._colorizer = rs.colorizer()
         self._align = rs.align(rs.stream.depth)
         # 配置相机捕获帧类型
-        self._cfg = rs.config()
-        self._cfg.enable_stream(rs.stream.color, 1280, 720, rs.format.bgr8, 30)
-        self._cfg.enable_stream(rs.stream.depth, 1280, 720, rs.format.z16, 30)
-        self._cfg.enable_stream(rs.stream.infrared, 1, 1280, 720, rs.format.y8, 30)
-        self._cfg.enable_stream(rs.stream.infrared, 2, 1280, 720, rs.format.y8, 30)
+        self._config = rs.config()
+        self._config.enable_stream(rs.stream.color, 1280, 720, rs.format.bgr8, 30)
+        self._config.enable_stream(rs.stream.depth, 1280, 720, rs.format.z16, 30)
+        self._config.enable_stream(rs.stream.infrared, 1, 1280, 720, rs.format.y8, 30)
+        self._config.enable_stream(rs.stream.infrared, 2, 1280, 720, rs.format.y8, 30)
 
     def _call_back(self, _frames):
         _frames = rs.composite_frame(_frames)
@@ -38,7 +38,7 @@ class LabStream:
         )
 
     def start_stream(self):
-        self._profile = self._pipeline.start(self._cfg, self._call_back)
+        self._profile = self._pipeline.start(self._config, self._call_back)
         if not self._profile:
             raise RuntimeError("启动 Stream 失败")
         return self._frame_buffer
