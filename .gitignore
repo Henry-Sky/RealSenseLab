@@ -1,10 +1,3 @@
 .idea
 .venv
 models
-build
-dist
-RealSenseLab.spec
-test.py
-test.jpg
-out.jpg
-runtime_hook.py

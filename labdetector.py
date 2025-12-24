@@ -36,7 +36,7 @@ class LabDetector:
             self._face_boxes.clear()
         self._face_boxes.append(_box)
 
-    def detect_face(self, _frame : np.ndarray) -> None:
+    def detect_once(self, _frame : np.ndarray) -> None:
         """
         检测人脸
         :param _frame: BGR8格式图片
@@ -86,7 +86,7 @@ if __name__ == '__main__':
         ret, frame = cap.read()
         if not ret: raise RuntimeError("读取摄像头失败")
         if frame_cnt % 3 == 0:
-            detector.detect_face(frame)
+            detector.detect_once(frame)
         box = detector.get_face_box()
         if box is not None:
             x1, y1, x2, y2 = box
