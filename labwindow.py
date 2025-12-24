@@ -92,6 +92,7 @@ class LabWindow(QMainWindow):
 
         if self._running and self.frame_buffer is not None and len(self.frame_buffer) > 0:
             current_frames : FramePair = self.frame_buffer.peek(-1)
+            photo_img = spawn_noise_background(200, 300, "未知人像")
             view_bgr8 = current_frames.frame_bgr8
             if self._depth_button.isChecked():
                 view_bgr8 = trans_pseudo_color(current_frames.frame_z16)
@@ -100,14 +101,19 @@ class LabWindow(QMainWindow):
                     self.detector.detect_once(current_frames.frame_bgr8)
                 if self.frame_cnt > DETECTION_DELAY_STAMP_FRAMES:
                     self.detector.draw_face_rectangle(view_bgr8)
+                roi_bgr8 = self.detector.get_face_roi(view_bgr8, 200, 300)
+                if roi_bgr8 is not None:
+                    photo_img = bgr8_to_qimage(roi_bgr8)
             view_img = bgr8_to_qimage(view_bgr8)
             self._view_label.setPixmap(QPixmap.fromImage(view_img))
+            self._photo_label.setPixmap(QPixmap.fromImage(photo_img))
         self.frame_cnt += 1
 
 
     def closeEvent(self, event: QCloseEvent):
+        self._running = True
+        self.toggle_running()
         super().closeEvent(event)
-        pass
 
 if __name__ == "__main__":
     app = QApplication([])
