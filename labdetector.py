@@ -1,7 +1,6 @@
 import time
 from dataclasses import dataclass
 from typing import Tuple
-
 import cv2
 import mediapipe as mp
 import numpy as np
@@ -26,11 +25,11 @@ class LabDetector:
         fd_options = FaceDetectorOptions(
             base_options=BaseOptions(model_asset_path = model_path),
             running_mode=RunningMode.LIVE_STREAM,
-            min_detection_confidence=0.6,
+            min_detection_confidence=0.7,
             result_callback=self._face_result_callback,
         )
         self._face_detector = FaceDetector.create_from_options(fd_options)
-        self._face_caches = deque(maxlen=16)
+        self._face_caches = deque(maxlen=3)
         self._start_time = time.time()  # 单位 s
 
     def _face_result_callback(self, result: FaceDetectorResult, output_image: mp.Image, timestamp_ms: int):
@@ -58,6 +57,32 @@ class LabDetector:
             self._face_caches.append(_face_cache)
             return
 
+    def get_face_roi(self, frame_bgr8, width: int, height: int) -> np.ndarray | None:
+        _box = self._get_face_box()
+        if not _box:
+            return None
+        tgt_ratio = width / height
+        _x1, _y1, _x2, _y2 = _box
+        img_h, img_w = frame_bgr8[:2]
+        fw, fh = _x2 - _x1, _y2 - _y1
+        src_ratio = fw / fh
+        # 原框更宽 -> 裁宽
+        if src_ratio > tgt_ratio:
+            new_fw = int(fh * tgt_ratio)
+            dw = fw - new_fw
+            _x1 += dw // 2
+            _x2 -= dw - dw // 2
+        # 原框更高 -> 裁高
+        else:
+            new_fh = int(fw / tgt_ratio)
+            dh = fh - new_fh
+            _y1 += dh // 2
+            _y2 -= dh - dh // 2
+        # 裁剪并缩放，不改颜色
+        roi_bgr8 = frame_bgr8[_y1:_y2, _x1:_x2]
+        roi_bgr8 = cv2.resize(roi_bgr8, (width, height), interpolation=cv2.INTER_LINEAR)
+        return roi_bgr8
+
     def detect_once(self, _frame : np.ndarray) -> None:
         """
         检测人脸
@@ -69,7 +94,7 @@ class LabDetector:
         timestamp_ms = int((time.time() - self._start_time) * 1000)  # 单位 ms
         self._face_detector.detect_async(mp_image, timestamp_ms)
 
-    def get_face_box(self) -> tuple[int, int, int, int] | None:
+    def _get_face_box(self) -> tuple[int, int, int, int] | None:
         """
         按与最新帧的时间差指数衰减加权，越新框权重越大
         :return: x1, y1, x2, y2
@@ -92,7 +117,7 @@ class LabDetector:
         return _x1, _y1, _x2, _y2  # (x1,y1,x2,y2)
 
     def draw_face_rectangle(self, frame: np.ndarray) -> None:
-        face_box = self.get_face_box()
+        face_box = self._get_face_box()
         if face_box is not None:
             x1, y1, x2, y2 = face_box
             cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
@@ -115,7 +140,7 @@ if __name__ == '__main__':
         if not ret: raise RuntimeError("读取摄像头失败")
         if frame_cnt % 3 == 0:
             detector.detect_once(frame)
-        box = detector.get_face_box()
+        box = detector._get_face_box()
         if box is not None:
             x1, y1, x2, y2 = box
             cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
