@@ -1,8 +1,10 @@
 from PySide6.QtCore import QTimer
-from PySide6.QtGui import QCloseEvent, Qt, QPixmap
-from PySide6.QtWidgets import QMainWindow, QApplication, QLabel, QPushButton, QHBoxLayout, QVBoxLayout, QWidget
+from PySide6.QtGui import QCloseEvent, QPixmap
+from PySide6.QtWidgets import QMainWindow, QApplication, QLabel, QPushButton, QHBoxLayout, QVBoxLayout, QWidget, \
+    QToolBar
 
-from framebuffer import FrameBuffer, FramePair
+from framebuffer import FramePair
+from labdetector import LabDetector
 from labstream import LabStream
 from utils.qutils import spawn_noise_background, bgr8_to_qimage
 from utils.file import load_file_content
@@ -12,7 +14,9 @@ class LabWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("RealSenseLab Demo")
         self.stream = LabStream()
+        self.detector = LabDetector()
         self.frame_buffer = None
+        self.frame_cnt = 0  # 帧计数器
         self._running = False
 
         # --------------------------创建组件&命名组件--------------------------
@@ -24,6 +28,11 @@ class LabWindow(QMainWindow):
         self._result_label.setObjectName("result_label")
         self._run_button = QPushButton(self)
         self._run_button.setObjectName("run_button")
+        self._tool_bar = QToolBar(self)
+        self._tool_bar.setObjectName("tool_bar")
+        self._depth_button = QPushButton("深度伪彩")
+        self._face_button = QPushButton("人脸识别")
+        self._body_button = QPushButton("身体框图")
 
         # ------------------------------配置组件------------------------------
         view_img = spawn_noise_background(1280, 720, "无视频信号")
@@ -33,6 +42,12 @@ class LabWindow(QMainWindow):
         self._result_label.setText("无法识别")
         self._run_button.setText("开始")
         self._run_button.clicked.connect(self.toggle_running)
+        self._depth_button.setCheckable(True)
+        self._face_button.setCheckable(True)
+        self._body_button.setCheckable(True)
+        self._tool_bar.addWidget(self._depth_button)
+        self._tool_bar.addWidget(self._face_button)
+        self._tool_bar.addWidget(self._body_button)
 
         # ------------------------------设置布局------------------------------
         main_hbox = QHBoxLayout()
@@ -50,6 +65,7 @@ class LabWindow(QMainWindow):
         central_widget.setLayout(main_hbox)
         self.setCentralWidget(central_widget)
         self.setStyleSheet(load_file_content("resources/styles/style.qss"))
+        self.addToolBar(self._tool_bar)
 
         # ------------------------------启动定时------------------------------
         self.timer = QTimer(self)
@@ -68,16 +84,22 @@ class LabWindow(QMainWindow):
             self._running = True
 
     def windows_update(self):
-        if self._running and self.frame_buffer is not None and len(self.frame_buffer) > 0:
-            last_frames : FramePair = self.frame_buffer.peek(-1)
-            view_img = bgr8_to_qimage(last_frames.original_bgr8)
-            self._view_label.setPixmap(QPixmap.fromImage(view_img))
-
-        else:
+        if not self._running or not self.frame_buffer or len(self.frame_buffer) <= 0:
             view_img = spawn_noise_background(1280, 720, "无视频信号")
             self._view_label.setPixmap(QPixmap.fromImage(view_img))
             photo_img = spawn_noise_background(200, 300, "未知人像")
             self._photo_label.setPixmap(QPixmap.fromImage(photo_img))
+
+        if self._running and self.frame_buffer is not None and len(self.frame_buffer) > 0:
+            last_frames : FramePair = self.frame_buffer.peek(-1)
+            if self._face_button.isChecked():
+                if self.frame_cnt % 6 == 0:
+                    self.detector.detect_once(last_frames.frame_bgr8)
+                if self.frame_cnt > 6:
+                    self.detector.draw_face_rectangle(last_frames.original_bgr8)
+            view_img = bgr8_to_qimage(last_frames.original_bgr8)
+            self._view_label.setPixmap(QPixmap.fromImage(view_img))
+        self.frame_cnt += 1
 
 
     def closeEvent(self, event: QCloseEvent):
