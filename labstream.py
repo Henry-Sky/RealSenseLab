@@ -18,14 +18,16 @@ class LabStream:
         self._config.enable_stream(rs.stream.infrared, 2, 1280, 720, rs.format.y8, 30)
 
     def _call_back(self, _frames):
-        _frames = rs.composite_frame(_frames)
-        _frames_aligned : rs.composite_frame = self._align.process(_frames)
+        _composed_frames = rs.composite_frame(_frames)
+        _original_frame = _composed_frames.get_color_frame()
+        _frames_aligned : rs.composite_frame = self._align.process(_composed_frames)
         _color_frame = _frames_aligned.get_color_frame()
         _depth_frame = _frames_aligned.get_depth_frame()
         _infrared_1_frame = _frames_aligned.get_infrared_frame(1)
         _infrared_2_frame = _frames_aligned.get_infrared_frame(2)
         self._frame_buffer.put(
             FramePair(
+                original_bgr8=np.array(_original_frame.get_data()),
                 frame_bgr8=np.asarray(_color_frame.get_data()),
                 frame_z16=np.asarray(_depth_frame.get_data()),
                 frame_ir1_y8=np.asarray(_infrared_1_frame.get_data()),
@@ -43,8 +45,9 @@ class LabStream:
             raise RuntimeError("启动 Stream 失败")
         return self._frame_buffer
 
-    def stop_stream(self):
+    def stop_stream(self) -> None:
         self._pipeline.stop()
+        return None
 
 
 if __name__ == '__main__':
