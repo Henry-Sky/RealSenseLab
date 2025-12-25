@@ -2,11 +2,15 @@ import random
 import threading
 import time
 from dataclasses import dataclass
-from typing import Tuple
+from typing import Tuple, Any
 import cv2
 import numpy as np
+from cv2 import Mat, UMat
 from insightface.app import FaceAnalysis
 from collections import deque
+
+from numpy import ndarray, dtype, integer, floating
+
 from utils.file import BASE_DIR
 from pyrealsense2 import rs2_deproject_pixel_to_point, rs2_project_point_to_pixel, distortion, intrinsics
 
@@ -38,10 +42,11 @@ class LabDetector:
         intr.coeffs = [0] * 5
         return intr
 
-    def get_face_roi(self, frame_bgr8, width: int, height: int) -> np.ndarray | None:
-        if not self._get_smooth_face_info():
+    def get_face_roi(self, frame_bgr8, width: int, height: int) -> tuple[Mat | ndarray | UMat, bool] | None:
+        _face_info = self._get_smooth_face_info()
+        if not _face_info:
             return None
-        _bbox = self._get_smooth_face_info().bbox
+        _bbox = _face_info.bbox
         tgt_ratio = width / height
         _x1, _y1, _x2, _y2 = _bbox
         img_h, img_w = frame_bgr8.shape[:2]
@@ -66,7 +71,7 @@ class LabDetector:
         # 裁剪并缩放，不改颜色
         roi_bgr8 = frame_bgr8[_y1:_y2, _x1:_x2]
         roi_bgr8 = cv2.resize(roi_bgr8, (width, height), interpolation=cv2.INTER_LINEAR)
-        return roi_bgr8
+        return roi_bgr8, _face_info.is_photo
 
     def detect_once(self, _frame_bgr8 : np.ndarray, _frame_z16 : np.ndarray = None) -> None:
         threading.Thread(target=self._detect_thread(_frame_bgr8, _frame_z16), daemon=True).start()

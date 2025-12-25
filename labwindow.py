@@ -104,9 +104,16 @@ class LabWindow(QMainWindow):
                     self.detector.draw_face_rectangle(view_bgr8)
                     if self._body_button.isChecked():
                         self.detector.draw_body_rect(view_bgr8, current_frames.frame_z16)
-                roi_bgr8 = self.detector.get_face_roi(view_bgr8, 200, 300)
-                if roi_bgr8 is not None:
+                res = self.detector.get_face_roi(view_bgr8, 200, 300)
+                if res is not None:
+                    roi_bgr8, flag = res
                     photo_img = bgr8_to_qimage(roi_bgr8)
+                    if flag:
+                        self._result_label.setText("人像照片")
+                    else:
+                        self._result_label.setText("真实人类")
+                else:
+                    self._result_label.setText("无法识别")
             view_img = bgr8_to_qimage(view_bgr8)
             self._view_label.setPixmap(QPixmap.fromImage(view_img))
             self._photo_label.setPixmap(QPixmap.fromImage(photo_img))
