@@ -1,6 +1,7 @@
 import time
 import numpy as np
 import pyrealsense2 as rs
+
 from framebuffer import FrameBuffer, FramePair
 
 class LabStream:
@@ -37,6 +38,9 @@ class LabStream:
                 ts_ir2=_infrared_2_frame.get_timestamp(),
             )
         )
+
+    def get_device_profile(self):
+        return self._profile
 
     def start_stream(self):
         self._profile = self._pipeline.start(self._config, self._call_back)

@@ -80,6 +80,7 @@ class LabWindow(QMainWindow):
             self._running = False
         else:
             self.frame_buffer = self.stream.start_stream()
+            self.detector.device_profile = self.stream.get_device_profile()
             self._run_button.setText("停止")
             self._running = True
 
@@ -98,7 +99,7 @@ class LabWindow(QMainWindow):
                 view_bgr8 = trans_pseudo_color(current_frames.frame_z16)
             if self._face_button.isChecked():
                 if self.frame_cnt % DETECTION_DELAY_STAMP_FRAMES == 0:
-                    self.detector.detect_once(current_frames.frame_bgr8)
+                    self.detector.detect_once(current_frames.frame_bgr8, current_frames.frame_z16)
                 if self.frame_cnt > DETECTION_DELAY_STAMP_FRAMES:
                     self.detector.draw_face_rectangle(view_bgr8)
                 roi_bgr8 = self.detector.get_face_roi(view_bgr8, 200, 300)
