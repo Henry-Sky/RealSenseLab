@@ -7,6 +7,7 @@ from framebuffer import FrameBuffer, FramePair
 class LabStream:
     def __init__(self):
         self._profile = None
+        self.ctx = rs.context()
         self._frame_buffer = FrameBuffer(maxsize=6)  # 长度为 6 的定长缓冲队列
         self._pipeline = rs.pipeline()
         self._colorizer = rs.colorizer()
@@ -40,6 +41,16 @@ class LabStream:
         )
 
     def start_stream(self):
+        devices = self.ctx.query_devices()
+        if len(devices) == 0:
+            raise RuntimeError("未检测到 RealSense 设备")
+        else:
+            print(f"检测到 {len(devices)} 个 RealSense 设备：")
+            for dev in devices:
+                print("设备信息：")
+                print("  型号:", dev.get_info(rs.camera_info.name))
+                print("  序列号:", dev.get_info(rs.camera_info.serial_number))
+                print("  固件版本:", dev.get_info(rs.camera_info.firmware_version))
         self._profile = self._pipeline.start(self._config, self._call_back)
         if not self._profile:
             raise RuntimeError("启动 Stream 失败")
