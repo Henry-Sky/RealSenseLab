@@ -1,11 +1,11 @@
 from PySide6.QtCore import QTimer
-from PySide6.QtGui import QCloseEvent, QPixmap
+from PySide6.QtGui import QCloseEvent, QPixmap, QIcon
 from PySide6.QtWidgets import QMainWindow, QApplication, QLabel, QPushButton, QHBoxLayout, QVBoxLayout, QWidget, QToolBar
 from framebuffer import FramePair
 from labdetector import LabDetector
 from labstream import LabStream
 from utils.qutils import spawn_noise_background, bgr8_to_qimage, trans_pseudo_color
-from utils.file import load_file_content
+from utils.file import load_file_content, lab_read_path
 
 DETECTION_DELAY_STAMP_FRAMES = 3 # 每 3 帧调用一次检测器线程
 WINDOWS_UPDATE_FPS = 60  # 窗口刷新 FPS
@@ -14,6 +14,7 @@ class LabWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("RealSenseLab Demo")
+        self.setWindowIcon(QIcon(lab_read_path("resources/imgs/icon.ico")))
         self.stream = LabStream()
         self.detector = LabDetector()
         self.frame_buffer = None

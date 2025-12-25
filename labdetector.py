@@ -11,7 +11,7 @@ from utils.file import BASE_DIR
 from pyrealsense2 import rs2_deproject_pixel_to_point, rs2_project_point_to_pixel, distortion, intrinsics
 
 AFTER_FRAMES_CLEAR = 9  # 默认 9 帧未更新 cache 就将其重置
-MAX_FACE_CACHES_LENGTH = 6
+MAX_FACE_CACHES_LENGTH = 9
 
 
 @dataclass(slots=True)
@@ -68,7 +68,7 @@ class LabDetector:
         roi_bgr8 = cv2.resize(roi_bgr8, (width, height), interpolation=cv2.INTER_LINEAR)
         return roi_bgr8
 
-    def detect_once(self, _frame_bgr8 : np.ndarray, _frame_z16 : np.ndarray) -> None:
+    def detect_once(self, _frame_bgr8 : np.ndarray, _frame_z16 : np.ndarray = None) -> None:
         threading.Thread(target=self._detect_thread(_frame_bgr8, _frame_z16), daemon=True).start()
 
     def _detect_thread(self, _frame_bgr8 : np.ndarray, _frame_z16 : np.ndarray):
@@ -86,7 +86,7 @@ class LabDetector:
         _y2 = int(_y2)
         _face_cache = FaceInfo(
             bbox=(_x1, _y1, _x2, _y2),
-            is_photo=self._photo_judge(_frame_z16, (_x1, _y1, _x2, _y2)),
+            is_photo=self._photo_judge(_frame_z16, (_x1, _y1, _x2, _y2)) if _frame_z16 is not None else True,
             timestamp_ms=timestamp_ms,
         )
         if not self._face_caches:
@@ -131,7 +131,6 @@ class LabDetector:
         H, W = frame_z16.shape[:2]
         x1, y1, x2, y2 = np.clip(roi_xyxy, [0, 0, 0, 0], [W - 1, H - 1, W - 1, H - 1])
         roi_z = frame_z16[y1:y2, x1:x2]
-        print(roi_z.min(), roi_z.max())
         uy, ux = np.where(roi_z > 0)  # 只取>0
         if uy.size == 0:
             return np.empty((0, 3), np.float32)
@@ -168,7 +167,7 @@ class LabDetector:
         """
         使用简化的RANSAC算法判断3D点是否平面化
         :param points_3d: 输入的3D点集
-        :param dist_thresh: 距离阈值，默认值为0.02
+        :param dist_thresh: 距离阈值，默认值为0.01
         :param ratio_thresh: 内点比例阈值，默认值为0.8
         :param max_iter: 最大迭代次数，默认值为80
         :return: 如果点集平面化则返回True，否则返回False
@@ -200,10 +199,10 @@ class LabDetector:
             if inliers > best_inliers:
                 best_inliers = inliers
                 if best_inliers >= target_count:
-                    print(f"best_inliers is {best_inliers} target_count is {target_count} N is {N}")
+                    print(f"best_inliers is {best_inliers}, target_count is {target_count}, N is {N}")
                     return True  # 如果内点数量超过阈值，判定为平面
         ratio_val = best_inliers / float(N)
-        print(f"ratio_val is {ratio_val} ratio_thresh is {ratio_thresh} N is {N}")
+        print(f"ratio_val is {ratio_val}, ratio_thresh is {ratio_thresh}, N is {N}")
         return ratio_val >= ratio_thresh
 
     def draw_face_rectangle(self, frame: np.ndarray) -> None:
