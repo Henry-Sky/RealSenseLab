@@ -9,6 +9,7 @@ import numpy as np
 from insightface.app import FaceAnalysis
 from collections import deque
 from utils.file import BASE_DIR
+from pyrealsense2 import stream, rs2_deproject_pixel_to_point, rs2_project_point_to_pixel, distortion, intrinsics
 
 AFTER_FRAMES_CLEAR = 9  # 默认 9 帧未更新 cache 就将其重置
 MAX_FACE_CACHES_LENGTH = 6
@@ -204,6 +205,81 @@ class LabDetector:
                 cv2.rectangle(frame, (x1, y1), (x2, y2), (255, 0, 0), 2)
             else:
                 cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
+
+    def draw_body_rect(self,
+                       frame_bgr8: np.ndarray,
+                       frame_z16: np.ndarray):
+        """
+        在 1280×720 BGR 图像上绘制人体 3-D AABB 框
+        参数:
+            frame_bgr8: 8-bit BGR,  shape (H, W, 3)
+            frame_z16:  16-bit 深度（mm）, shape (H, W)
+        """
+        face_info = self._get_smooth_face_info()
+        if not face_info or face_info.is_photo or not self.device_profile:
+            return
+
+        # 1. 动态读取实际分辨率
+        H, W = frame_bgr8.shape[:2]  # 720p -> (720, 1280)
+        z_h, z_w = frame_z16.shape[:2]  # 可能是 480p(640,480) 或 720p(1280,720)
+
+        # 2. 把深度图 resize 到与彩色图完全一致（最近邻保边）
+        if (z_h, z_w) != (H, W):
+            frame_z16 = cv2.resize(frame_z16, (W, H), interpolation=cv2.INTER_NEAREST)
+        depth32 = frame_z16.astype(np.float32)
+
+        # 3. 构造与彩色图同分辨率的内参
+        intr = intrinsics()
+        intr.width, intr.height = W, H
+        intr.ppx, intr.ppy = W * 0.5, H * 0.5  # 主点居中
+        intr.fx = intr.fy = 424.0 * (W / 640.)  # 按水平分辨率等比放大 fx/fy
+        intr.model = distortion.brown_conrady
+        intr.coeffs = [0] * 5
+
+        # 4. 人脸中心作为 flood-fill 种子
+        x1, y1, x2, y2 = face_info.bbox
+        cx, cy = (x1 + x2) // 2, (y1 + y2) // 2
+        seed_z = depth32[cy, cx]
+        if seed_z == 0:
+            return
+
+        # 5. floodFill 得 mask
+        mask = np.zeros((H + 2, W + 2), np.uint8)
+        cv2.floodFill(depth32, mask, (cx, cy), 0,
+                      loDiff=50, upDiff=50,
+                      flags=4 | cv2.FLOODFILL_MASK_ONLY | (255 << 8))
+        mask = mask[1:-1, 1:-1]
+        if np.count_nonzero(mask) < 500:
+            return
+
+        # 6. 3-D 点云
+        ys, xs = np.where(mask)
+        zs = frame_z16[ys, xs] / 1000.0
+        pts_cam = np.array([rs2_deproject_pixel_to_point(intr, [u, v], z)
+                            for u, v, z in zip(xs, ys, zs)], dtype=np.float32)
+
+        # 7. PCA 求主方向 + AABB
+        mean, eig_vec = cv2.PCACompute(pts_cam, mean=None)
+        eig_vec = eig_vec[:3]
+        pts_local = (pts_cam - mean) @ eig_vec.T
+        local_min = pts_local.min(axis=0)
+        local_max = pts_local.max(axis=0)
+        dx, dy, dz = local_max - local_min
+        corners_local = np.array([
+            [0, 0, 0], [dx, 0, 0], [dx, dy, 0], [0, dy, 0],
+            [0, 0, dz], [dx, 0, dz], [dx, dy, dz], [0, dy, dz]
+        ]) + local_min
+        corners_cam = (corners_local @ eig_vec) + mean
+
+        # 8. 投影回 2-D 并画框
+        pts2d = np.array([rs2_project_point_to_pixel(intr, p)
+                          for p in corners_cam]).astype(int)
+        edges = [(0, 1), (1, 2), (2, 3), (3, 0),
+                 (4, 5), (5, 6), (6, 7), (7, 4),
+                 (0, 4), (1, 5), (2, 6), (3, 7)]
+        for i, j in edges:
+            cv2.line(frame_bgr8, tuple(pts2d[i]), tuple(pts2d[j]),
+                     (0, 255, 0), 2)
 
 
 

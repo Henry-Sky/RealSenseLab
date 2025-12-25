@@ -102,6 +102,8 @@ class LabWindow(QMainWindow):
                     self.detector.detect_once(current_frames.frame_bgr8, current_frames.frame_z16)
                 if self.frame_cnt > DETECTION_DELAY_STAMP_FRAMES:
                     self.detector.draw_face_rectangle(view_bgr8)
+                    if self._body_button.isChecked():
+                        self.detector.draw_body_rect(view_bgr8, current_frames.frame_z16)
                 roi_bgr8 = self.detector.get_face_roi(view_bgr8, 200, 300)
                 if roi_bgr8 is not None:
                     photo_img = bgr8_to_qimage(roi_bgr8)
