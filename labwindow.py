@@ -80,7 +80,6 @@ class LabWindow(QMainWindow):
             self._running = False
         else:
             self.frame_buffer = self.stream.start_stream()
-            self.detector.device_profile = self.stream.get_device_profile()
             self._run_button.setText("停止")
             self._running = True
 

@@ -39,9 +39,6 @@ class LabStream:
             )
         )
 
-    def get_device_profile(self):
-        return self._profile
-
     def start_stream(self):
         self._profile = self._pipeline.start(self._config, self._call_back)
         if not self._profile:

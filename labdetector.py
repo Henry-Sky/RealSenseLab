@@ -4,12 +4,11 @@ import time
 from dataclasses import dataclass
 from typing import Tuple
 import cv2
-from pyrealsense2 import stream
 import numpy as np
 from insightface.app import FaceAnalysis
 from collections import deque
 from utils.file import BASE_DIR
-from pyrealsense2 import stream, rs2_deproject_pixel_to_point, rs2_project_point_to_pixel, distortion, intrinsics
+from pyrealsense2 import rs2_deproject_pixel_to_point, rs2_project_point_to_pixel, distortion, intrinsics
 
 AFTER_FRAMES_CLEAR = 9  # 默认 9 帧未更新 cache 就将其重置
 MAX_FACE_CACHES_LENGTH = 6
@@ -24,11 +23,20 @@ class FaceInfo:
 
 class LabDetector:
     def __init__(self):
-        self.device_profile = None
+        self._device_intr = self._init_device_intr()
         self._face_detector = FaceAnalysis(providers=['CUDAExecutionProvider', 'CPUExecutionProvider'], root=BASE_DIR)
         self._face_detector.prepare(ctx_id=0, det_size=(640, 640))
         self._face_caches = deque(maxlen=MAX_FACE_CACHES_LENGTH)
         self._start_time = time.time()  # 单位 s
+
+    def _init_device_intr(self):
+        intr = intrinsics()
+        intr.width, intr.height = 1280, 720
+        intr.ppx, intr.ppy = 640.0, 360.0
+        intr.fx = intr.fy = 848
+        intr.model = distortion.brown_conrady
+        intr.coeffs = [0] * 5
+        return intr
 
     def get_face_roi(self, frame_bgr8, width: int, height: int) -> np.ndarray | None:
         if not self._get_smooth_face_info():
@@ -118,10 +126,31 @@ class LabDetector:
             is_photo=is_photo,
         )
 
+    def roi_to_points(self, frame_z16, roi_xyxy):
+        """返回 (N,3) 单位米，已剔除 NaN"""
+        H, W = frame_z16.shape[:2]
+        x1, y1, x2, y2 = np.clip(roi_xyxy, [0, 0, 0, 0], [W - 1, H - 1, W - 1, H - 1])
+        roi_z = frame_z16[y1:y2, x1:x2]
+        print(roi_z.min(), roi_z.max())
+        uy, ux = np.where(roi_z > 0)  # 只取>0
+        if uy.size == 0:
+            return np.empty((0, 3), np.float32)
+
+        u = (x1 + ux).astype(np.float32)
+        v = (y1 + uy).astype(np.float32)
+        z = roi_z[uy, ux] * 0.001  # mm->m
+
+        pts = np.empty((u.size, 3), np.float32)
+        for i in range(u.size):
+            pts[i] = rs2_deproject_pixel_to_point(self._device_intr, [u[i], v[i]], z[i])
+
+        # 把 NaN 整行干掉
+        pts = pts[~np.isnan(pts).any(axis=1)]
+        return pts
+
     def _photo_judge(self, frame_z16, bbox):
         """True:photo, False:person"""
-        x1, y1, x2, y2 = bbox
-        frame_pts = self.frame_z16_to_points(frame_z16[y1:y2, x1:x2])
+        frame_pts = self.roi_to_points(frame_z16, bbox)
         plane_flag = self.plane_fit_ransac_simplified(frame_pts)
         if plane_flag:
             print("plane_flag is True")
@@ -144,11 +173,16 @@ class LabDetector:
         :param max_iter: 最大迭代次数，默认值为80
         :return: 如果点集平面化则返回True，否则返回False
         """
+        # 去掉 NaN/Inf
+        points_3d = np.asarray(points_3d)
+        points_3d = points_3d[~np.isnan(points_3d).any(axis=1)]
+        points_3d = points_3d[~np.isinf(points_3d).any(axis=1)]
+
         N = len(points_3d)
         if N < 30:
             print("points_3d is too small")
             return True  # 如果点数太少，直接判定为平面
-        best_inliers = 0
+        best_inliers = 0.0
         target_count = int(ratio_thresh * N)
         idxs = np.arange(N)
         for _ in range(max_iter):
@@ -172,31 +206,6 @@ class LabDetector:
         print(f"ratio_val is {ratio_val} ratio_thresh is {ratio_thresh} N is {N}")
         return ratio_val >= ratio_thresh
 
-    def frame_z16_to_points(self, frame_z16 : np.ndarray, depth_scale=None, intrin=None):
-        """
-        把 depth_frame_z16
-        返回: points_3d  shape=(H*W, 3), dtype=float64
-        """
-        if self.device_profile is not None:
-            depth_scale = self.device_profile.get_device().first_depth_sensor().get_depth_scale()
-            intrin = self.device_profile.get_stream(stream.depth).as_video_stream_profile().get_intrinsics()
-        else:
-            if depth_scale is None or intrin is None:
-                return None
-        H, W = frame_z16.shape[:2]
-        z = frame_z16 * depth_scale  # 米
-        # 构建像素坐标网格
-        u, v = np.meshgrid(np.arange(W, dtype=np.float32),
-                           np.arange(H, dtype=np.float32), indexing='xy')
-        # 反投影到相机坐标系
-        x = (u - intrin.ppx) * z / intrin.fx
-        y = (v - intrin.ppy) * z / intrin.fy
-        # 堆叠成 N×3
-        points_3d = np.stack([x, y, z], axis=-1).reshape(-1, 3)
-        # 去掉 0 深度无效点
-        valid = points_3d[:, 2] > 0
-        return points_3d[valid]
-
     def draw_face_rectangle(self, frame: np.ndarray) -> None:
         face_info = self._get_smooth_face_info()
         if face_info is not None:
@@ -206,9 +215,7 @@ class LabDetector:
             else:
                 cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
 
-    def draw_body_rect(self,
-                       frame_bgr8: np.ndarray,
-                       frame_z16: np.ndarray):
+    def draw_body_rect(self, frame_bgr8: np.ndarray, frame_z16: np.ndarray):
         """
         在 1280×720 BGR 图像上绘制人体 3-D AABB 框
         参数:
@@ -216,7 +223,7 @@ class LabDetector:
             frame_z16:  16-bit 深度（mm）, shape (H, W)
         """
         face_info = self._get_smooth_face_info()
-        if not face_info or face_info.is_photo or not self.device_profile:
+        if not face_info or face_info.is_photo:
             return
 
         # 1. 动态读取实际分辨率
@@ -229,7 +236,7 @@ class LabDetector:
         depth32 = frame_z16.astype(np.float32)
 
         # 3. 构造与彩色图同分辨率的内参
-        intr = intrinsics()
+        intr = self._device_intr
         intr.width, intr.height = W, H
         intr.ppx, intr.ppy = W * 0.5, H * 0.5  # 主点居中
         intr.fx = intr.fy = 424.0 * (W / 640.)  # 按水平分辨率等比放大 fx/fy
