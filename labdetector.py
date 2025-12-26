@@ -1,17 +1,12 @@
+import cv2
+import time
 import random
 import threading
-import time
-from dataclasses import dataclass
-from email.iterators import body_line_iterator
-from typing import Tuple, Any
-import cv2
 import numpy as np
-from cv2 import Mat, UMat
-from insightface.app import FaceAnalysis
+from typing import Tuple
 from collections import deque
-
-from numpy import ndarray, dtype, integer, floating
-
+from dataclasses import dataclass
+from insightface.app import FaceAnalysis
 from utils.file import BASE_DIR
 from pyrealsense2 import rs2_deproject_pixel_to_point, rs2_project_point_to_pixel, distortion, intrinsics
 
@@ -44,7 +39,7 @@ class LabDetector:
         intr.coeffs = [0] * 5
         return intr
 
-    def get_face_roi(self, frame_bgr8, width: int, height: int) -> tuple[Mat | ndarray | UMat, bool] | None:
+    def get_face_roi(self, frame_bgr8, width: int, height: int) -> tuple[np.ndarray, bool] | None:
         _face_info = self._get_smooth_face_info()
         if not _face_info:
             return None
@@ -131,9 +126,9 @@ class LabDetector:
         smooth_photo = bool(np.round(photos @ weight))
         return FaceInfo(
             bbox=(_x1, _y1, _x2, _y2),
-            body_lines=last_cache.body_lines,
+            body_lines=last_cache.body_lines if not smooth_photo else None,
             timestamp_ms=timestamp_ms,
-            is_photo=last_cache.is_photo,
+            is_photo=smooth_photo,
         )
 
     def roi_to_points(self, frame_z16, roi_xyxy):
