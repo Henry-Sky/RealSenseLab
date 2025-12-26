@@ -1,7 +1,6 @@
 import time
 import numpy as np
 import pyrealsense2 as rs
-
 from framebuffer import FrameBuffer, FramePair
 
 class LabStream:

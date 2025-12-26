@@ -222,7 +222,7 @@ class LabDetector:
             cv2.rectangle(frame_bgr8, (x1, y1), (x2, y2), (0, 255, 0), 2)
 
     def _detect_body_edges(self, frame_bgr8: np.ndarray, frame_z16 : np.ndarray, bbox : Tuple[int, int, int, int]) -> None | np.ndarray:
-        print("body detecting")
+        # print("body detecting")
         img_h, img_w = frame_bgr8.shape[:2]
         intr = self._device_intr  # 获取设备内参
         depth32 = frame_z16.astype(np.float32)

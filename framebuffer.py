@@ -1,9 +1,9 @@
-import numpy as np
 import time
 import threading
-from dataclasses import dataclass
-from collections import deque
+import numpy as np
 from typing import List
+from collections import deque
+from dataclasses import dataclass
 
 @dataclass(slots=True)
 class FramePair:
