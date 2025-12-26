@@ -2,6 +2,7 @@ import random
 import threading
 import time
 from dataclasses import dataclass
+from email.iterators import body_line_iterator
 from typing import Tuple, Any
 import cv2
 import numpy as np
@@ -22,6 +23,7 @@ MAX_FACE_CACHES_LENGTH = 9
 class FaceInfo:
     bbox : Tuple[int, int, int, int]
     is_photo : bool
+    body_lines : np.ndarray | None
     timestamp_ms : int
 
 
@@ -73,10 +75,10 @@ class LabDetector:
         roi_bgr8 = cv2.resize(roi_bgr8, (width, height), interpolation=cv2.INTER_LINEAR)
         return roi_bgr8, _face_info.is_photo
 
-    def detect_once(self, _frame_bgr8 : np.ndarray, _frame_z16 : np.ndarray = None) -> None:
-        threading.Thread(target=self._detect_thread(_frame_bgr8, _frame_z16), daemon=True).start()
+    def detect_once(self, _frame_bgr8 : np.ndarray, _frame_z16 : np.ndarray = None, body_calc = False) -> None:
+        threading.Thread(target=self._detect_thread(_frame_bgr8, _frame_z16, body_calc), daemon=True).start()
 
-    def _detect_thread(self, _frame_bgr8 : np.ndarray, _frame_z16 : np.ndarray):
+    def _detect_thread(self, _frame_bgr8 : np.ndarray, _frame_z16 : np.ndarray, body_calc) -> None:
         faces = self._face_detector.get(_frame_bgr8)
         if faces is None or len(faces) == 0:
             return
@@ -89,20 +91,21 @@ class LabDetector:
         _y1 = int(_y1)
         _x2 = int(_x2)
         _y2 = int(_y2)
-        _face_cache = FaceInfo(
+        photo_flag = self._photo_judge(_frame_z16, (_x1, _y1, _x2, _y2)) if _frame_z16 is not None else True
+        body_lines = self._detect_body_edges(_frame_bgr8, _frame_z16, bbox) if body_calc and not photo_flag else None
+        _face_info = FaceInfo(
             bbox=(_x1, _y1, _x2, _y2),
-            is_photo=self._photo_judge(_frame_z16, (_x1, _y1, _x2, _y2)) if _frame_z16 is not None else True,
+            is_photo=photo_flag,
+            body_lines=body_lines,
             timestamp_ms=timestamp_ms,
         )
         if not self._face_caches:
-            self._face_caches.append(_face_cache)
-            return
+            self._face_caches.append(_face_info)
         else:
             last_cache: FaceInfo = self._face_caches[-1]
-            if _face_cache.timestamp_ms - last_cache.timestamp_ms > 33 * AFTER_FRAMES_CLEAR:
+            if _face_info.timestamp_ms - last_cache.timestamp_ms > 33 * AFTER_FRAMES_CLEAR:
                 self._face_caches.clear()
-            self._face_caches.append(_face_cache)
-            return
+            self._face_caches.append(_face_info)
 
     def _get_smooth_face_info(self) -> FaceInfo | None:
         """
@@ -119,16 +122,18 @@ class LabDetector:
         # 拆解 face_cache 的 box 和 timestamp_ms
         boxes = np.array([x.bbox for x in self._face_caches], dtype=np.float32)
         times = np.array([x.timestamp_ms for x in self._face_caches])  # 时间戳列
-        is_photo = last_cache.is_photo
+        photos = np.array([x.is_photo for x in self._face_caches], dtype=np.float32)
         dt = times[-1] - times  # 与最新帧的差(ms)
         alpha = 0.7  # 衰减系数，可调
         weight = alpha ** (dt / 33.)  # 33 ms ≈ 30 fps 基准
         weight /= weight.sum()  # 归一化
         _x1, _y1, _x2, _y2 = (boxes[:, :4].T @ weight).astype(int)  # 只平滑 x1,y1,x2,y2
+        smooth_photo = bool(np.round(photos @ weight))
         return FaceInfo(
             bbox=(_x1, _y1, _x2, _y2),
+            body_lines=last_cache.body_lines,
             timestamp_ms=timestamp_ms,
-            is_photo=is_photo,
+            is_photo=last_cache.is_photo,
         )
 
     def roi_to_points(self, frame_z16, roi_xyxy):
@@ -157,14 +162,14 @@ class LabDetector:
         frame_pts = self.roi_to_points(frame_z16, bbox)
         plane_flag = self.plane_fit_ransac_simplified(frame_pts)
         if plane_flag:
-            print("plane_flag is True")
+            # print("plane_flag is True")
             return True
         # 分布检查
         xyz_min = np.min(frame_pts, axis=0)
         xyz_max = np.max(frame_pts, axis=0)
         diff_xyz = xyz_max - xyz_min
         if diff_xyz[0] < 0.02 and diff_xyz[1] < 0.02 and diff_xyz[2] < 0.02:
-            print("diff_xyz is too small")
+            # print("diff_xyz is too small")
             return True
         return False
 
@@ -184,7 +189,7 @@ class LabDetector:
 
         N = len(points_3d)
         if N < 30:
-            print("points_3d is too small")
+            # print("points_3d is too small")
             return True  # 如果点数太少，直接判定为平面
         best_inliers = 0.0
         target_count = int(ratio_thresh * N)
@@ -204,72 +209,48 @@ class LabDetector:
             if inliers > best_inliers:
                 best_inliers = inliers
                 if best_inliers >= target_count:
-                    print(f"best_inliers is {best_inliers}, target_count is {target_count}, N is {N}")
+                    # print(f"best_inliers is {best_inliers}, target_count is {target_count}, N is {N}")
                     return True  # 如果内点数量超过阈值，判定为平面
         ratio_val = best_inliers / float(N)
-        print(f"ratio_val is {ratio_val}, ratio_thresh is {ratio_thresh}, N is {N}")
+        # print(f"ratio_val is {ratio_val}, ratio_thresh is {ratio_thresh}, N is {N}")
         return ratio_val >= ratio_thresh
 
-    def draw_face_rectangle(self, frame: np.ndarray) -> None:
-        face_info = self._get_smooth_face_info()
-        if face_info is not None:
-            x1, y1, x2, y2 = face_info.bbox
-            if face_info.is_photo:
-                cv2.rectangle(frame, (x1, y1), (x2, y2), (255, 0, 0), 2)
-            else:
-                cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
-
-    def draw_body_rect(self, frame_bgr8: np.ndarray, frame_z16: np.ndarray):
-        """
-        在 1280×720 BGR 图像上绘制人体 3-D AABB 框
-        参数:
-            frame_bgr8: 8-bit BGR,  shape (H, W, 3)
-            frame_z16:  16-bit 深度（mm）, shape (H, W)
-        """
-        face_info = self._get_smooth_face_info()
-        if not face_info or face_info.is_photo:
-            return
-
-        # 1. 动态读取实际分辨率
-        H, W = frame_bgr8.shape[:2]  # 720p -> (720, 1280)
-        z_h, z_w = frame_z16.shape[:2]  # 可能是 480p(640,480) 或 720p(1280,720)
-
-        # 2. 把深度图 resize 到与彩色图完全一致（最近邻保边）
-        if (z_h, z_w) != (H, W):
-            frame_z16 = cv2.resize(frame_z16, (W, H), interpolation=cv2.INTER_NEAREST)
-        depth32 = frame_z16.astype(np.float32)
-
-        # 3. 构造与彩色图同分辨率的内参
-        intr = self._device_intr
-        intr.width, intr.height = W, H
-        intr.ppx, intr.ppy = W * 0.5, H * 0.5  # 主点居中
-        intr.fx = intr.fy = 424.0 * (W / 640.)  # 按水平分辨率等比放大 fx/fy
-        intr.model = distortion.brown_conrady
-        intr.coeffs = [0] * 5
-
-        # 4. 人脸中心作为 flood-fill 种子
+    def draw_face_rectangle(self, frame_bgr8: np.ndarray, face_info = None) -> None:
+        if not face_info:
+            face_info = self._get_smooth_face_info()
+            if face_info is None:
+                return
         x1, y1, x2, y2 = face_info.bbox
-        cx, cy = (x1 + x2) // 2, (y1 + y2) // 2
+        if face_info.is_photo:
+            cv2.rectangle(frame_bgr8, (x1, y1), (x2, y2), (0, 0, 255), 2)
+        else:
+            cv2.rectangle(frame_bgr8, (x1, y1), (x2, y2), (0, 255, 0), 2)
+
+    def _detect_body_edges(self, frame_bgr8: np.ndarray, frame_z16 : np.ndarray, bbox : Tuple[int, int, int, int]) -> None | np.ndarray:
+        print("body detecting")
+        img_h, img_w = frame_bgr8.shape[:2]
+        intr = self._device_intr  # 获取设备内参
+        depth32 = frame_z16.astype(np.float32)
+        x1, y1, x2, y2 = bbox
+        cx = int((x1 + x2) // 2)
+        cy = int((y1 + y2) // 2)
         seed_z = depth32[cy, cx]
         if seed_z == 0:
-            return
-
-        # 5. floodFill 得 mask
-        mask = np.zeros((H + 2, W + 2), np.uint8)
+            return None
+        # floodFill 泛洪得 mask
+        mask = np.zeros((img_h + 2, img_w + 2), np.uint8)
         cv2.floodFill(depth32, mask, (cx, cy), 0,
                       loDiff=50, upDiff=50,
                       flags=4 | cv2.FLOODFILL_MASK_ONLY | (255 << 8))
         mask = mask[1:-1, 1:-1]
         if np.count_nonzero(mask) < 500:
-            return
-
-        # 6. 3-D 点云
+            return None
+        # 3-D 点云
         ys, xs = np.where(mask)
         zs = frame_z16[ys, xs] / 1000.0
         pts_cam = np.array([rs2_deproject_pixel_to_point(intr, [u, v], z)
                             for u, v, z in zip(xs, ys, zs)], dtype=np.float32)
-
-        # 7. PCA 求主方向 + AABB
+        # PCA 求主方向 + AABB包围盒8点坐标
         mean, eig_vec = cv2.PCACompute(pts_cam, mean=None)
         eig_vec = eig_vec[:3]
         pts_local = (pts_cam - mean) @ eig_vec.T
@@ -281,17 +262,33 @@ class LabDetector:
             [0, 0, dz], [dx, 0, dz], [dx, dy, dz], [0, dy, dz]
         ]) + local_min
         corners_cam = (corners_local @ eig_vec) + mean
-
-        # 8. 投影回 2-D 并画框
+        # 投影回 2-D 并画框
         pts2d = np.array([rs2_project_point_to_pixel(intr, p)
                           for p in corners_cam]).astype(int)
-        edges = [(0, 1), (1, 2), (2, 3), (3, 0),
+        edges_idx = [(0, 1), (1, 2), (2, 3), (3, 0),
                  (4, 5), (5, 6), (6, 7), (7, 4),
                  (0, 4), (1, 5), (2, 6), (3, 7)]
-        for i, j in edges:
-            cv2.line(frame_bgr8, tuple(pts2d[i]), tuple(pts2d[j]),
-                     (0, 255, 0), 2)
+        lines = np.asarray([[pts2d[i], pts2d[j]] for i, j in edges_idx], dtype=np.int32)
+        return lines
 
+    def draw_body_rectangle(self, frame_bgr8: np.ndarray, face_info = None) -> None:
+        """
+        在 1280×720 BGR 图像上绘制人体 3-D AABB 包围框
+        参数:
+            frame_bgr8: 8-bit BGR,  shape (H, W, 3)
+            face_info:  FaceInfo 人脸作为泛洪种子
+        """
+        if not face_info:
+            face_info = self._get_smooth_face_info()
+            if not face_info:
+                return
+        if face_info.is_photo:
+            return
+
+        lines = face_info.body_lines
+        if lines is not None:
+            for (p0, p1) in lines:
+                cv2.line(frame_bgr8, tuple(p0), tuple(p1), (255, 0, 0), 2)
 
 
 if __name__ == '__main__':

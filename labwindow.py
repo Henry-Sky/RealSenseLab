@@ -7,7 +7,7 @@ from labstream import LabStream
 from utils.qutils import spawn_noise_background, bgr8_to_qimage, trans_pseudo_color
 from utils.file import load_file_content, lab_read_path
 
-DETECTION_DELAY_STAMP_FRAMES = 3 # 每 3 帧调用一次检测器线程
+DETECTION_DELAY_STAMP_FRAMES = 6 # 每 3 帧调用一次检测器线程
 WINDOWS_UPDATE_FPS = 60  # 窗口刷新 FPS
 
 class LabWindow(QMainWindow):
@@ -99,11 +99,11 @@ class LabWindow(QMainWindow):
                 view_bgr8 = trans_pseudo_color(current_frames.frame_z16)
             if self._face_button.isChecked():
                 if self.frame_cnt % DETECTION_DELAY_STAMP_FRAMES == 0:
-                    self.detector.detect_once(current_frames.frame_bgr8, current_frames.frame_z16)
+                    self.detector.detect_once(current_frames.frame_bgr8, current_frames.frame_z16, self._body_button.isChecked())
                 if self.frame_cnt > DETECTION_DELAY_STAMP_FRAMES:
                     self.detector.draw_face_rectangle(view_bgr8)
                     if self._body_button.isChecked():
-                        self.detector.draw_body_rect(view_bgr8, current_frames.frame_z16)
+                        self.detector.draw_body_rectangle(view_bgr8)
                 res = self.detector.get_face_roi(view_bgr8, 200, 300)
                 if res is not None:
                     roi_bgr8, flag = res
