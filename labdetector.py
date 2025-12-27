@@ -77,30 +77,55 @@ class LabDetector:
         faces = self._face_detector.get(_frame_bgr8)
         if faces is None or len(faces) == 0:
             return
-
+        # 检测到人脸，进入后期处理
         timestamp_ms = int((time.time() - self._start_time) * 1000)  # 单位 ms
         best_face = max(faces, key=lambda f: f['det_score'])
         bbox = best_face['bbox']
-        _x1, _y1, _x2, _y2 = bbox
-        _x1 = int(_x1)
-        _y1 = int(_y1)
-        _x2 = int(_x2)
-        _y2 = int(_y2)
+        _x1, _y1, _x2, _y2 = map(int, bbox)
         photo_flag = self._photo_judge(_frame_z16, (_x1, _y1, _x2, _y2)) if _frame_z16 is not None else True
-        body_lines = self._detect_body_edges(_frame_bgr8, _frame_z16, bbox) if body_calc and not photo_flag else None
+        # 优化body_lines计算方式
+        if not self._face_caches:
+            body_lines = self._detect_body_edges(_frame_bgr8, _frame_z16, bbox) if body_calc and not photo_flag else None
+        else:
+            last_cache: FaceInfo = self._face_caches[-1]
+            if self._bbox_almost_same(last_cache.bbox, bbox) and not last_cache.is_photo:
+                body_lines = last_cache.body_lines
+            else:
+                body_lines = self._detect_body_edges(_frame_bgr8, _frame_z16,
+                                                 bbox) if body_calc and not photo_flag else None
+            if timestamp_ms - last_cache.timestamp_ms > 33 * AFTER_FRAMES_CLEAR:
+                self._face_caches.clear()
+        # 添加到缓冲队列
         _face_info = FaceInfo(
             bbox=(_x1, _y1, _x2, _y2),
             is_photo=photo_flag,
             body_lines=body_lines,
             timestamp_ms=timestamp_ms,
         )
-        if not self._face_caches:
-            self._face_caches.append(_face_info)
-        else:
-            last_cache: FaceInfo = self._face_caches[-1]
-            if _face_info.timestamp_ms - last_cache.timestamp_ms > 33 * AFTER_FRAMES_CLEAR:
-                self._face_caches.clear()
-            self._face_caches.append(_face_info)
+        self._face_caches.append(_face_info)
+
+    def _bbox_almost_same(self, b1, b2, th=0.05):
+        """th: 相对变化阈值，0.05=5%"""
+        xa1, ya1, xa2, ya2 = b1
+        xb1, yb1, xb2, yb2 = b2
+        area_a = (xa2 - xa1) * (ya2 - ya1)
+        area_b = (xb2 - xb1) * (yb2 - yb1)
+        if area_a <= 0 or area_b <= 0:
+            return False
+        # 交集 / 并集
+        dx = min(xa2, xb2) - max(xa1, xb1)
+        dy = min(ya2, yb2) - max(ya1, yb1)
+        if dx <= 0 or dy <= 0:
+            return False
+        inter = dx * dy
+        union = area_a + area_b - inter
+        iou = inter / union
+        # 中心点偏移
+        cx_a, cy_a = (xa1 + xa2) / 2, (ya1 + ya2) / 2
+        cx_b, cy_b = (xb1 + xb2) / 2, (yb1 + yb2) / 2
+        shift = abs(cx_a - cx_b) + abs(cy_a - cy_b)
+        diag = np.hypot(xa2 - xa1, ya2 - ya1)
+        return iou > 0.9 and shift / diag < th
 
     def _get_smooth_face_info(self) -> FaceInfo | None:
         """
@@ -155,7 +180,7 @@ class LabDetector:
     def _photo_judge(self, frame_z16, bbox):
         """True:photo, False:person"""
         frame_pts = self.roi_to_points(frame_z16, bbox)
-        plane_flag = self.plane_fit_ransac_simplified(frame_pts)
+        plane_flag = self._plane_fit_ransac_simplified(frame_pts)
         if plane_flag:
             # print("plane_flag is True")
             return True
@@ -168,7 +193,7 @@ class LabDetector:
             return True
         return False
 
-    def plane_fit_ransac_simplified(self, points_3d, dist_thresh=0.005, ratio_thresh=0.8, max_iter=30):
+    def _plane_fit_ransac_simplified(self, points_3d, dist_thresh=0.005, ratio_thresh=0.8, max_iter=30):
         """
         使用简化的RANSAC算法判断3D点是否平面化
         :param points_3d: 输入的3D点集
