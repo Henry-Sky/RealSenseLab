@@ -31,6 +31,7 @@ class LabDetector:
         self._start_time = time.time()  # 单位 s
 
     def _init_device_intr(self):
+        """获取设备内参"""
         intr = intrinsics()
         intr.width, intr.height = 1280, 720
         intr.ppx, intr.ppy = 640.0, 360.0
@@ -40,6 +41,7 @@ class LabDetector:
         return intr
 
     def get_face_roi(self, frame_bgr8, width: int, height: int) -> tuple[np.ndarray, bool] | None:
+        """获取ROI区域图片以及照片判断结果"""
         _face_info = self._get_smooth_face_info()
         if not _face_info:
             return None
@@ -71,9 +73,11 @@ class LabDetector:
         return roi_bgr8, _face_info.is_photo
 
     def detect_once(self, _frame_bgr8 : np.ndarray, _frame_z16 : np.ndarray = None, body_calc = False) -> None:
+        """创建并调用检测线程"""
         threading.Thread(target=self._detect_thread(_frame_bgr8, _frame_z16, body_calc), daemon=True).start()
 
     def _detect_thread(self, _frame_bgr8 : np.ndarray, _frame_z16 : np.ndarray, body_calc) -> None:
+        """检测线程执行函数"""
         faces = self._face_detector.get(_frame_bgr8)
         if faces is None or len(faces) == 0:
             return
@@ -105,7 +109,7 @@ class LabDetector:
         self._face_caches.append(_face_info)
 
     def _bbox_almost_same(self, b1, b2, th=0.05):
-        """th: 相对变化阈值，0.05=5%"""
+        """判断人脸框变化幅度，th:相对变化阈值"""
         xa1, ya1, xa2, ya2 = b1
         xb1, yb1, xb2, yb2 = b2
         area_a = (xa2 - xa1) * (ya2 - ya1)
@@ -130,7 +134,7 @@ class LabDetector:
     def _get_smooth_face_info(self) -> FaceInfo | None:
         """
         按与最新帧的时间差指数衰减加权，越新框权重越大
-        :return: x1, y1, x2, y2
+        :return: bbox(x1, y1, x2, y2) | None
         """
         if not self._face_caches:
             return None
@@ -156,30 +160,27 @@ class LabDetector:
             is_photo=smooth_photo,
         )
 
-    def roi_to_points(self, frame_z16, roi_xyxy):
-        """返回 (N,3) 单位米，已剔除 NaN"""
-        H, W = frame_z16.shape[:2]
-        x1, y1, x2, y2 = np.clip(roi_xyxy, [0, 0, 0, 0], [W - 1, H - 1, W - 1, H - 1])
-        roi_z = frame_z16[y1:y2, x1:x2]
+    def _roi_to_points(self, frame_z16, roi_bbox):
+        """ROI区域深度Z16 -> 3D点云，已剔除 NaN"""
+        img_h, img_w = frame_z16.shape[:2]
+        _x1, _y1, _x2, _y2 = np.clip(roi_bbox, [0, 0, 0, 0], [img_w - 1, img_h - 1, img_w - 1, img_h - 1])
+        roi_z = frame_z16[_y1:_y2, _x1:_x2]
         uy, ux = np.where(roi_z > 0)  # 只取>0
         if uy.size == 0:
             return np.empty((0, 3), np.float32)
-
-        u = (x1 + ux).astype(np.float32)
-        v = (y1 + uy).astype(np.float32)
+        u = (_x1 + ux).astype(np.float32)
+        v = (_y1 + uy).astype(np.float32)
         z = roi_z[uy, ux] * 0.001  # mm->m
-
         pts = np.empty((u.size, 3), np.float32)
         for i in range(u.size):
             pts[i] = rs2_deproject_pixel_to_point(self._device_intr, [u[i], v[i]], z[i])
-
-        # 把 NaN 整行干掉
+        # 把 NaN 整行去除
         pts = pts[~np.isnan(pts).any(axis=1)]
         return pts
 
     def _photo_judge(self, frame_z16, bbox):
-        """True:photo, False:person"""
-        frame_pts = self.roi_to_points(frame_z16, bbox)
+        """照片判断，True:photo, False:person"""
+        frame_pts = self._roi_to_points(frame_z16, bbox)
         plane_flag = self._plane_fit_ransac_simplified(frame_pts)
         if plane_flag:
             # print("plane_flag is True")
@@ -236,6 +237,7 @@ class LabDetector:
         return ratio_val >= ratio_thresh
 
     def draw_face_rectangle(self, frame_bgr8: np.ndarray, face_info = None) -> None:
+        """绘制脸部检测框：绿色真人；红色照片"""
         if not face_info:
             face_info = self._get_smooth_face_info()
             if face_info is None:
@@ -247,6 +249,7 @@ class LabDetector:
             cv2.rectangle(frame_bgr8, (x1, y1), (x2, y2), (0, 255, 0), 2)
 
     def _detect_body_edges(self, frame_bgr8: np.ndarray, frame_z16 : np.ndarray, bbox : Tuple[int, int, int, int]) -> None | np.ndarray:
+        """计算人体3d边线：性能开销巨大！"""
         # print("body detecting")
         img_h, img_w = frame_bgr8.shape[:2]
         intr = self._device_intr  # 获取设备内参
@@ -292,12 +295,7 @@ class LabDetector:
         return lines
 
     def draw_body_rectangle(self, frame_bgr8: np.ndarray, face_info = None) -> None:
-        """
-        在 1280×720 BGR 图像上绘制人体 3-D AABB 包围框
-        参数:
-            frame_bgr8: 8-bit BGR,  shape (H, W, 3)
-            face_info:  FaceInfo 人脸作为泛洪种子
-        """
+        """绘制人体3D包围框"""
         if not face_info:
             face_info = self._get_smooth_face_info()
             if not face_info:
