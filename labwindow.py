@@ -24,10 +24,6 @@ class LabWindow(QMainWindow):
         # --------------------------创建组件&命名组件--------------------------
         self._view_label = QLabel(self)
         self._view_label.setObjectName("view_label")
-        self._photo_label = QLabel(self)
-        self._photo_label.setObjectName("photo_label")
-        self._result_label = QLabel(self)
-        self._result_label.setObjectName("result_label")
         self._run_button = QPushButton(self)
         self._run_button.setObjectName("run_button")
         self._tool_bar = QToolBar(self)
@@ -39,9 +35,6 @@ class LabWindow(QMainWindow):
         # ------------------------------配置组件------------------------------
         view_img = spawn_noise_background(1280, 720, "无视频信号")
         self._view_label.setPixmap(QPixmap.fromImage(view_img))
-        photo_img = spawn_noise_background(200, 300, "未知人像")
-        self._photo_label.setPixmap(QPixmap.fromImage(photo_img))
-        self._result_label.setText("无法识别")
         self._run_button.setText("开始")
         self._run_button.clicked.connect(self.toggle_running)
         self._depth_button.setCheckable(True)
@@ -54,13 +47,9 @@ class LabWindow(QMainWindow):
         # ------------------------------设置布局------------------------------
         main_hbox = QHBoxLayout()
         left_vbox = QVBoxLayout()
-        right_vbox = QVBoxLayout()
         left_vbox.addWidget(self._view_label)
-        right_vbox.addWidget(self._photo_label)
-        right_vbox.addWidget(self._result_label)
-        right_vbox.addWidget(self._run_button)
+        left_vbox.addWidget(self._run_button)
         main_hbox.addLayout(left_vbox)
-        main_hbox.addLayout(right_vbox)
 
         # ------------------------------窗口核心------------------------------
         central_widget = QWidget(self)
@@ -88,9 +77,6 @@ class LabWindow(QMainWindow):
         if not self._running or not self.frame_buffer or len(self.frame_buffer) <= 0:
             view_img = spawn_noise_background(1280, 720, "无视频信号")
             self._view_label.setPixmap(QPixmap.fromImage(view_img))
-            photo_img = spawn_noise_background(200, 300, "未知人像")
-            self._photo_label.setPixmap(QPixmap.fromImage(photo_img))
-
         if self._running and self.frame_buffer is not None and len(self.frame_buffer) > 0:
             current_frames : FramePair = self.frame_buffer.peek(-1)
             photo_img = spawn_noise_background(200, 300, "未知人像")
@@ -104,19 +90,8 @@ class LabWindow(QMainWindow):
                     self.detector.draw_face_rectangle(view_bgr8)
                     if self._body_button.isChecked():
                         self.detector.draw_body_rectangle(view_bgr8)
-                res = self.detector.get_face_roi(view_bgr8, 200, 300)
-                if res is not None:
-                    roi_bgr8, flag = res
-                    photo_img = bgr8_to_qimage(roi_bgr8)
-                    if flag:
-                        self._result_label.setText("人像照片")
-                    else:
-                        self._result_label.setText("真实人类")
-                else:
-                    self._result_label.setText("无法识别")
             view_img = bgr8_to_qimage(view_bgr8)
             self._view_label.setPixmap(QPixmap.fromImage(view_img))
-            self._photo_label.setPixmap(QPixmap.fromImage(photo_img))
         self.frame_cnt += 1
 
 
