@@ -26,7 +26,7 @@ class LabDetector:
     def __init__(self):
         self._device_intr = self._init_device_intr()
         self._face_detector = FaceAnalysis(providers=['CUDAExecutionProvider', 'CPUExecutionProvider'], root=BASE_DIR)
-        self._face_detector.prepare(ctx_id=0, det_size=(640, 640))
+        self._face_detector.prepare(ctx_id=0, det_size=(256, 256))
         self._face_caches = deque(maxlen=MAX_FACE_CACHES_LENGTH)
         self._start_time = time.time()  # 单位 s
 
@@ -40,38 +40,6 @@ class LabDetector:
         intr.coeffs = [0] * 5
         return intr
 
-    def get_face_roi(self, frame_bgr8, width: int, height: int) -> tuple[np.ndarray, bool] | None:
-        """获取ROI区域图片以及照片判断结果"""
-        _face_info = self._get_smooth_face_info()
-        if not _face_info:
-            return None
-        _bbox = _face_info.bbox
-        tgt_ratio = width / height
-        _x1, _y1, _x2, _y2 = _bbox
-        img_h, img_w = frame_bgr8.shape[:2]
-        fw, fh = _x2 - _x1, _y2 - _y1
-        src_ratio = fw / fh
-        # 原框更宽 -> 裁宽
-        if src_ratio > tgt_ratio:
-            new_fw = int(fh * tgt_ratio)
-            dw = fw - new_fw
-            _x1 += dw // 2
-            _x2 -= dw - dw // 2
-        # 原框更高 -> 裁高
-        else:
-            new_fh = int(fw / tgt_ratio)
-            dh = fh - new_fh
-            _y1 += dh // 2
-            _y2 -= dh - dh // 2
-        _x1 = max(0, int(_x1))
-        _y1 = max(0, int(_y1))
-        _x2 = min(int(img_w), int(_x2))
-        _y2 = min(int(img_h), int(_y2))
-        # 裁剪并缩放，不改颜色
-        roi_bgr8 = frame_bgr8[_y1:_y2, _x1:_x2]
-        roi_bgr8 = cv2.resize(roi_bgr8, (width, height), interpolation=cv2.INTER_LINEAR)
-        return roi_bgr8, _face_info.is_photo
-
     def detect_once(self, _frame_bgr8 : np.ndarray, _frame_z16 : np.ndarray = None, body_calc = False) -> None:
         """创建并调用检测线程"""
         threading.Thread(target=self._detect_thread(_frame_bgr8, _frame_z16, body_calc), daemon=True).start()
@@ -83,82 +51,21 @@ class LabDetector:
             return
         # 检测到人脸，进入后期处理
         timestamp_ms = int((time.time() - self._start_time) * 1000)  # 单位 ms
-        best_face = max(faces, key=lambda f: f['det_score'])
-        bbox = best_face['bbox']
-        _x1, _y1, _x2, _y2 = map(int, bbox)
-        photo_flag = self._photo_judge(_frame_z16, (_x1, _y1, _x2, _y2)) if _frame_z16 is not None else True
-        # 优化body_lines计算方式
-        if not self._face_caches:
-            body_lines = self._detect_body_edges(_frame_bgr8, _frame_z16, bbox) if body_calc and not photo_flag else None
-        else:
-            last_cache: FaceInfo = self._face_caches[-1]
-            if self._bbox_almost_same(last_cache.bbox, bbox) and not last_cache.is_photo:
-                body_lines = last_cache.body_lines
-            else:
-                body_lines = self._detect_body_edges(_frame_bgr8, _frame_z16,
-                                                 bbox) if body_calc and not photo_flag else None
-            if timestamp_ms - last_cache.timestamp_ms > 33 * AFTER_FRAMES_CLEAR:
-                self._face_caches.clear()
-        # 添加到缓冲队列
-        _face_info = FaceInfo(
-            bbox=(_x1, _y1, _x2, _y2),
-            is_photo=photo_flag,
-            body_lines=body_lines,
-            timestamp_ms=timestamp_ms,
-        )
-        self._face_caches.append(_face_info)
-
-    def _bbox_almost_same(self, b1, b2, th=0.05):
-        """判断人脸框变化幅度，th:相对变化阈值"""
-        xa1, ya1, xa2, ya2 = b1
-        xb1, yb1, xb2, yb2 = b2
-        area_a = (xa2 - xa1) * (ya2 - ya1)
-        area_b = (xb2 - xb1) * (yb2 - yb1)
-        if area_a <= 0 or area_b <= 0:
-            return False
-        # 交集 / 并集
-        dx = min(xa2, xb2) - max(xa1, xb1)
-        dy = min(ya2, yb2) - max(ya1, yb1)
-        if dx <= 0 or dy <= 0:
-            return False
-        inter = dx * dy
-        union = area_a + area_b - inter
-        iou = inter / union
-        # 中心点偏移
-        cx_a, cy_a = (xa1 + xa2) / 2, (ya1 + ya2) / 2
-        cx_b, cy_b = (xb1 + xb2) / 2, (yb1 + yb2) / 2
-        shift = abs(cx_a - cx_b) + abs(cy_a - cy_b)
-        diag = np.hypot(xa2 - xa1, ya2 - ya1)
-        return iou > 0.9 and shift / diag < th
-
-    def _get_smooth_face_info(self) -> FaceInfo | None:
-        """
-        按与最新帧的时间差指数衰减加权，越新框权重越大
-        :return: bbox(x1, y1, x2, y2) | None
-        """
-        if not self._face_caches:
-            return None
-        timestamp_ms = int((time.time() - self._start_time) * 1000)  # 单位 ms
-        last_cache: FaceInfo = self._face_caches[-1]
-        if timestamp_ms - last_cache.timestamp_ms > 33 * AFTER_FRAMES_CLEAR:
-            self._face_caches.clear()
-            return None
-        # 拆解 face_cache 的 box 和 timestamp_ms
-        boxes = np.array([x.bbox for x in self._face_caches], dtype=np.float32)
-        times = np.array([x.timestamp_ms for x in self._face_caches])  # 时间戳列
-        photos = np.array([x.is_photo for x in self._face_caches], dtype=np.float32)
-        dt = times[-1] - times  # 与最新帧的差(ms)
-        alpha = 0.7  # 衰减系数，可调
-        weight = alpha ** (dt / 33.)  # 33 ms ≈ 30 fps 基准
-        weight /= weight.sum()  # 归一化
-        _x1, _y1, _x2, _y2 = (boxes[:, :4].T @ weight).astype(int)  # 只平滑 x1,y1,x2,y2
-        smooth_photo = bool(np.round(photos @ weight))
-        return FaceInfo(
-            bbox=(_x1, _y1, _x2, _y2),
-            body_lines=last_cache.body_lines if not smooth_photo else None,
-            timestamp_ms=timestamp_ms,
-            is_photo=smooth_photo,
-        )
+        self._face_caches.clear()
+        for face in faces:
+            bbox = face['bbox']
+            _x1, _y1, _x2, _y2 = map(int, bbox)
+            photo_flag = self._photo_judge(_frame_z16, (_x1, _y1, _x2, _y2)) if _frame_z16 is not None else True
+            body_lines = self._calculate_body_edges(_frame_bgr8, _frame_z16,
+                                                    bbox) if body_calc and not photo_flag else None
+            # 添加到缓冲队列
+            _face_info = FaceInfo(
+                bbox=(_x1, _y1, _x2, _y2),
+                is_photo=photo_flag,
+                body_lines=body_lines,
+                timestamp_ms=timestamp_ms,
+            )
+            self._face_caches.append(_face_info)
 
     def _roi_to_points(self, frame_z16, roi_bbox):
         """ROI区域深度Z16 -> 3D点云，已剔除 NaN"""
@@ -183,14 +90,12 @@ class LabDetector:
         frame_pts = self._roi_to_points(frame_z16, bbox)
         plane_flag = self._plane_fit_ransac_simplified(frame_pts)
         if plane_flag:
-            # print("plane_flag is True")
             return True
         # 分布检查
         xyz_min = np.min(frame_pts, axis=0)
         xyz_max = np.max(frame_pts, axis=0)
         diff_xyz = xyz_max - xyz_min
         if diff_xyz[0] < 0.02 and diff_xyz[1] < 0.02 and diff_xyz[2] < 0.02:
-            # print("diff_xyz is too small")
             return True
         return False
 
@@ -209,8 +114,7 @@ class LabDetector:
         points_3d = points_3d[~np.isinf(points_3d).any(axis=1)]
 
         N = len(points_3d)
-        if N < 30:
-            # print("points_3d is too small")
+        if N < 50:
             return True  # 如果点数太少，直接判定为平面
         best_inliers = 0.0
         target_count = int(ratio_thresh * N)
@@ -230,27 +134,24 @@ class LabDetector:
             if inliers > best_inliers:
                 best_inliers = inliers
                 if best_inliers >= target_count:
-                    # print(f"best_inliers is {best_inliers}, target_count is {target_count}, N is {N}")
                     return True  # 如果内点数量超过阈值，判定为平面
         ratio_val = best_inliers / float(N)
-        # print(f"ratio_val is {ratio_val}, ratio_thresh is {ratio_thresh}, N is {N}")
         return ratio_val >= ratio_thresh
 
-    def draw_face_rectangle(self, frame_bgr8: np.ndarray, face_info = None) -> None:
+    def draw_face_rectangle(self, frame_bgr8: np.ndarray) -> None:
         """绘制脸部检测框：绿色真人；红色照片"""
-        if not face_info:
-            face_info = self._get_smooth_face_info()
-            if face_info is None:
-                return
-        x1, y1, x2, y2 = face_info.bbox
-        if face_info.is_photo:
-            cv2.rectangle(frame_bgr8, (x1, y1), (x2, y2), (0, 0, 255), 2)
-        else:
-            cv2.rectangle(frame_bgr8, (x1, y1), (x2, y2), (0, 255, 0), 2)
+        for face_info in self._face_caches:
+            label = 'Photo' if face_info.is_photo else 'Person'
+            x1, y1, x2, y2 = face_info.bbox
+            color = (0, 0, 255) if face_info.is_photo else (0, 255, 0)
+            cv2.rectangle(frame_bgr8, (x1, y1), (x2, y2), color, 2)
+            text_size, _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 1)
+            text_x = x2 - text_size[0] - 2
+            text_y = y1 + text_size[1] + 2
+            cv2.putText(frame_bgr8, label,(text_x, text_y), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
 
-    def _detect_body_edges(self, frame_bgr8: np.ndarray, frame_z16 : np.ndarray, bbox : Tuple[int, int, int, int]) -> None | np.ndarray:
+    def _calculate_body_edges(self, frame_bgr8: np.ndarray, frame_z16 : np.ndarray, bbox : Tuple[int, int, int, int]) -> None | np.ndarray:
         """计算人体3d边线：性能开销巨大！"""
-        # print("body detecting")
         img_h, img_w = frame_bgr8.shape[:2]
         intr = self._device_intr  # 获取设备内参
         depth32 = frame_z16.astype(np.float32)
@@ -294,39 +195,20 @@ class LabDetector:
         lines = np.asarray([[pts2d[i], pts2d[j]] for i, j in edges_idx], dtype=np.int32)
         return lines
 
-    def draw_body_rectangle(self, frame_bgr8: np.ndarray, face_info = None) -> None:
+    def draw_body_rectangle(self, frame_bgr8: np.ndarray) -> None:
         """绘制人体3D包围框"""
-        if not face_info:
-            face_info = self._get_smooth_face_info()
-            if not face_info:
-                return
-        if face_info.is_photo:
-            return
-
-        lines = face_info.body_lines
-        if lines is not None:
-            for (p0, p1) in lines:
-                cv2.line(frame_bgr8, tuple(p0), tuple(p1), (255, 0, 0), 2)
+        for face_info in self._face_caches:
+            lines = face_info.body_lines
+            if lines is not None:
+                for (p0, p1) in lines:
+                    cv2.line(frame_bgr8, tuple(p0), tuple(p1), (255, 0, 0), 2)
 
 
 if __name__ == '__main__':
-    detector = LabDetector()
-    cap = cv2.VideoCapture(1)
-    if not cap.isOpened():
-        raise RuntimeError('无法打开摄像头')
-    cap.set(cv2.CAP_PROP_FPS, 30)
-
-    frame_cnt = 0  # 帧计数器
-    fps_delay = int(1000 / 30)  # 33 ms ≈ 30 fps
-
-    while True:
-        ret, frame = cap.read()
-        if not ret: raise RuntimeError("读取摄像头失败")
-        detector.detect_once(frame)
-        detector.draw_face_rectangle(frame)
-        cv2.imshow("frame", frame)
-        if cv2.waitKey(1) & 0xFF == ord('q'):
-            break
-    cv2.destroyAllWindows()
-    cap.release()
+    import timeit
+    # 测量函数执行时间
+    def foo():
+        return sum(range(10_000_000))
+    t = timeit.timeit(foo, number=5)
+    print(f"平均 {t / 5 * 1000:.3f} ms/次")
 
