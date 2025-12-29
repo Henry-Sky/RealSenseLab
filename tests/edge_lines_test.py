@@ -3,8 +3,8 @@ from typing import Tuple
 
 import cv2
 import numpy as np
-from testfile.testkits import generate_layered_depth
-from calculate_body_edges import calculate_body_edges
+from tests.testkits import generate_layered_depth
+from calculate_body_edges import calculate_body_edges  # 导入cpython编译后的算法
 from pyrealsense2 import rs2_deproject_pixel_to_point, rs2_project_point_to_pixel, intrinsics, distortion
 
 def test_device_intr(img: np.ndarray):
@@ -25,6 +25,7 @@ def test_device_intr(img: np.ndarray):
     intr.coeffs = [0.0] * 5
     return intr
 
+# 原始算法
 def _calculate_body_edges(intr : intrinsics, frame_bgr8: np.ndarray, frame_z16: np.ndarray,
                           bbox: Tuple[int, int, int, int]) -> None | np.ndarray:
     """计算人体3d边线：性能开销巨大！"""
@@ -72,7 +73,7 @@ def _calculate_body_edges(intr : intrinsics, frame_bgr8: np.ndarray, frame_z16: 
 
 
 if __name__ == "__main__":
-    img = cv2.imread('testfile/test.jpg')
+    img = cv2.imread('tests/test.jpg')
     depth = generate_layered_depth(img)
     intr = test_device_intr(img)
     bbox = (745, 342, 847, 480)
