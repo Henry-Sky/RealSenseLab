@@ -13,6 +13,21 @@ from pyrealsense2 import rs2_deproject_pixel_to_point, rs2_project_point_to_pixe
 AFTER_FRAMES_CLEAR = 9  # 默认 9 帧未更新 cache 就将其重置
 MAX_FACE_CACHES_LENGTH = 9  # 最大检测结果缓冲队列长度
 
+PROVIDERS = [
+    ('TensorrtExecutionProvider', {
+        'device_id': 0,
+        'trt_fp16_enable': True,
+        'trt_engine_cache_enable': True,
+        'trt_engine_cache_path': './trt_cache',
+        'trt_max_workspace_size': 2 << 30,
+        # 去掉括号，去掉 input:
+        'trt_profile_min_shapes': '1,3,160,160',
+        'trt_profile_opt_shapes': '4,3,640,640',
+        'trt_profile_max_shapes': '8,3,640,640',
+    }),
+    'CUDAExecutionProvider',
+    'CPUExecutionProvider',
+]
 
 @dataclass(slots=True)
 class FaceInfo:
@@ -25,7 +40,7 @@ class FaceInfo:
 class LabDetector:
     def __init__(self):
         self._device_intr = self._init_device_intr()
-        self._face_detector = get_model('models/buffalo_m/det_2.5g.onnx', providers=['CUDAExecutionProvider', 'CPUExecutionProvider'], root=BASE_DIR)
+        self._face_detector = get_model('models/buffalo_m/det_2.5g.onnx', providers=PROVIDERS, root=BASE_DIR)
         self._face_detector.prepare(ctx_id=0, input_size=(256, 256))
         self._face_caches = deque(maxlen=MAX_FACE_CACHES_LENGTH)
         self._start_time = time.time()  # 单位 s
