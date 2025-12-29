@@ -6,12 +6,12 @@ import numpy as np
 from typing import Tuple
 from collections import deque
 from dataclasses import dataclass
-from insightface.app import FaceAnalysis
+from insightface.model_zoo import get_model
 from utils.file import BASE_DIR
 from pyrealsense2 import rs2_deproject_pixel_to_point, rs2_project_point_to_pixel, distortion, intrinsics
 
 AFTER_FRAMES_CLEAR = 9  # 默认 9 帧未更新 cache 就将其重置
-MAX_FACE_CACHES_LENGTH = 9
+MAX_FACE_CACHES_LENGTH = 9  # 最大检测结果缓冲队列长度
 
 
 @dataclass(slots=True)
@@ -25,8 +25,8 @@ class FaceInfo:
 class LabDetector:
     def __init__(self):
         self._device_intr = self._init_device_intr()
-        self._face_detector = FaceAnalysis(providers=['CUDAExecutionProvider', 'CPUExecutionProvider'], root=BASE_DIR)
-        self._face_detector.prepare(ctx_id=0, det_size=(256, 256))
+        self._face_detector = get_model('models/buffalo_l/det_10g.onnx', providers=['CUDAExecutionProvider', 'CPUExecutionProvider'], root=BASE_DIR)
+        self._face_detector.prepare(ctx_id=0, input_size=(256, 256))
         self._face_caches = deque(maxlen=MAX_FACE_CACHES_LENGTH)
         self._start_time = time.time()  # 单位 s
 
@@ -46,14 +46,14 @@ class LabDetector:
 
     def _detect_thread(self, _frame_bgr8 : np.ndarray, _frame_z16 : np.ndarray, body_calc) -> None:
         """检测线程执行函数"""
-        faces = self._face_detector.get(_frame_bgr8)
+        faces = self._face_detector.detect(_frame_bgr8)
         if faces is None or len(faces) == 0:
             return
         # 检测到人脸，进入后期处理
         timestamp_ms = int((time.time() - self._start_time) * 1000)  # 单位 ms
         self._face_caches.clear()
-        for face in faces:
-            bbox = face['bbox']
+        for face in faces[0]:
+            bbox = face[:4]
             _x1, _y1, _x2, _y2 = map(int, bbox)
             photo_flag = self._photo_judge(_frame_z16, (_x1, _y1, _x2, _y2)) if _frame_z16 is not None else True
             body_lines = self._calculate_body_edges(_frame_bgr8, _frame_z16,
@@ -137,6 +137,10 @@ class LabDetector:
                     return True  # 如果内点数量超过阈值，判定为平面
         ratio_val = best_inliers / float(N)
         return ratio_val >= ratio_thresh
+
+    def _calculate_body_action(self):
+        """ToDo: 细化分析深度信息，捕获人体骨架，判断行为动作 （或直接用黑盒模型）"""
+        pass
 
     def draw_face_rectangle(self, frame_bgr8: np.ndarray) -> None:
         """绘制脸部检测框：绿色真人；红色照片"""

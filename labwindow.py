@@ -79,7 +79,6 @@ class LabWindow(QMainWindow):
             self._view_label.setPixmap(QPixmap.fromImage(view_img))
         if self._running and self.frame_buffer is not None and len(self.frame_buffer) > 0:
             current_frames : FramePair = self.frame_buffer.peek(-1)
-            photo_img = spawn_noise_background(200, 300, "未知人像")
             view_bgr8 = current_frames.frame_bgr8
             if self._depth_button.isChecked():
                 view_bgr8 = trans_pseudo_color(current_frames.frame_z16)
