@@ -25,7 +25,7 @@ class FaceInfo:
 class LabDetector:
     def __init__(self):
         self._device_intr = self._init_device_intr()
-        self._face_detector = get_model('models/buffalo_l/det_10g.onnx', providers=['CUDAExecutionProvider', 'CPUExecutionProvider'], root=BASE_DIR)
+        self._face_detector = get_model('models/buffalo_m/det_2.5g.onnx', providers=['CUDAExecutionProvider', 'CPUExecutionProvider'], root=BASE_DIR)
         self._face_detector.prepare(ctx_id=0, input_size=(256, 256))
         self._face_caches = deque(maxlen=MAX_FACE_CACHES_LENGTH)
         self._start_time = time.time()  # 单位 s

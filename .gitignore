@@ -1,4 +1,5 @@
 .idea
 .venv
 models
+trt_cache
 ref
