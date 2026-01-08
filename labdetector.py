@@ -20,14 +20,13 @@ PROVIDERS = [
         'trt_engine_cache_enable': True,
         'trt_engine_cache_path': './trt_cache',
         'trt_max_workspace_size': 2 << 30,
-        # 去掉括号，去掉 input:
         'trt_profile_min_shapes': '1,3,160,160',
         'trt_profile_opt_shapes': '4,3,640,640',
         'trt_profile_max_shapes': '8,3,640,640',
     }),
     'CUDAExecutionProvider',
     'CPUExecutionProvider',
-]
+]  # 优先级：TensorRT > GPU > CPU
 
 @dataclass(slots=True)
 class FaceInfo:
@@ -70,9 +69,14 @@ class LabDetector:
         for face in faces[0]:
             bbox = face[:4]
             _x1, _y1, _x2, _y2 = map(int, bbox)
-            photo_flag = self._photo_judge(_frame_z16, (_x1, _y1, _x2, _y2)) if _frame_z16 is not None else True
-            body_lines = self._calculate_body_edges(_frame_bgr8, _frame_z16,
-                                                    bbox) if body_calc and not photo_flag else None
+            if _frame_z16 is not None:
+                photo_flag = self._photo_judge(_frame_z16, (_x1, _y1, _x2, _y2))
+            else:
+                photo_flag = True
+            if body_calc and not photo_flag:
+                body_lines = self._calculate_body_edges(_frame_bgr8, _frame_z16, bbox)
+            else:
+                body_lines = None
             # 添加到缓冲队列
             _face_info = FaceInfo(
                 bbox=(_x1, _y1, _x2, _y2),
